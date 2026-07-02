@@ -1,4 +1,5 @@
-@import url('https://fonts.cdnfonts.com/css/cabinet-grotesk');
+/* Cabinet Grotesk from Fontshare — reliable CDN, correct weights */
+@import url('https://api.fontshare.com/v2/css?f[]=cabinet-grotesk@400,500,600,700,800&display=swap');
 
 @tailwind base;
 @tailwind components;
@@ -45,19 +46,33 @@
   }
 
   body {
-    @apply bg-background text-text font-sans;
+    @apply bg-background text-text;
     font-family: var(--font-cabinet), system-ui, sans-serif;
+    font-weight: 500; /* Medium by default — bolder than browser default 400 */
+    font-size: 15px;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
   }
 
   h1, h2, h3, h4, h5, h6 {
-    @apply font-semibold tracking-tight;
     font-family: var(--font-cabinet), system-ui, sans-serif;
+    font-weight: 700; /* Bold headings */
+    letter-spacing: -0.02em;
+    line-height: 1.2;
   }
 
-  /* Remove default focus ring, use custom */
-  *:focus {
-    outline: none;
+  p, span, li, td, th, label {
+    font-weight: 500; /* Medium body text — more legible */
   }
+
+  /* Button text always semibold */
+  button {
+    font-family: var(--font-cabinet), system-ui, sans-serif;
+    font-weight: 600;
+  }
+
+  /* Remove focus ring, use custom */
+  *:focus { outline: none; }
 
   *:focus-visible {
     @apply ring-2 ring-primary ring-offset-2 rounded-md;
@@ -66,32 +81,25 @@
 
 /* ── Component Utilities ───────────────────────────────────── */
 @layer components {
-  /* Dashboard card */
   .dashboard-card {
     @apply bg-white rounded-2xl border border-border p-6 shadow-sm;
   }
 
-  /* Stat card */
   .stat-card {
     @apply bg-white rounded-xl border border-border p-5 space-y-1;
   }
 
-  /* Section header */
   .section-header {
     @apply flex items-center justify-between mb-4;
   }
 
-  /* Mobile bottom nav item */
   .nav-item {
     @apply flex flex-col items-center gap-1 text-text-secondary text-xs font-medium
            transition-colors duration-200 py-2 px-3 rounded-lg;
   }
 
-  .nav-item.active {
-    @apply text-primary;
-  }
+  .nav-item.active { @apply text-primary; }
 
-  /* Table */
   .data-table th {
     @apply text-xs font-semibold text-text-secondary uppercase tracking-wide
            bg-gray-50 px-4 py-3 text-left border-b border-border;
@@ -101,16 +109,8 @@
     @apply px-4 py-3 text-sm text-text border-b border-border/50;
   }
 
-  .data-table tr:last-child td {
-    @apply border-0;
-  }
+  .data-table tr:last-child td { @apply border-0; }
 
-  /* Trust score ring */
-  .trust-ring {
-    @apply relative flex items-center justify-center rounded-full;
-  }
-
-  /* Contribution progress */
   .progress-bar {
     @apply h-2 rounded-full bg-primary-light overflow-hidden;
   }
@@ -119,41 +119,29 @@
     @apply h-full bg-primary rounded-full transition-all duration-500;
   }
 
-  /* Input styles */
   .form-input {
-    @apply w-full rounded-lg border border-border bg-white px-3 py-2.5 text-sm
-           text-text placeholder:text-text-secondary focus:ring-2 focus:ring-primary/20
-           focus:border-primary transition-colors;
+    @apply w-full rounded-xl border border-border bg-white px-3.5 py-2.5 text-sm font-medium
+           text-text placeholder:text-text-secondary placeholder:font-normal
+           focus:ring-2 focus:ring-primary/20 focus:border-primary transition-colors;
   }
 
-  /* Badge */
   .badge {
-    @apply inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-medium;
+    @apply inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-semibold;
   }
 
-  /* Sidebar nav item */
   .sidebar-item {
     @apply flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium
            text-text-secondary hover:bg-primary-light hover:text-primary
            transition-all duration-150 cursor-pointer;
   }
 
-  .sidebar-item.active {
-    @apply bg-primary-light text-primary;
-  }
+  .sidebar-item.active { @apply bg-primary-light text-primary; }
 
-  /* Group card */
   .group-card {
     @apply bg-white rounded-2xl border border-border p-5 hover:border-primary/30
            hover:shadow-md transition-all duration-200 cursor-pointer;
   }
 
-  /* Landing section */
-  .landing-section {
-    @apply py-20 lg:py-28;
-  }
-
-  /* Container */
   .container-pad {
     @apply max-w-7xl mx-auto px-4 sm:px-6 lg:px-8;
   }
@@ -161,127 +149,40 @@
 
 /* ── Utility Classes ───────────────────────────────────────── */
 @layer utilities {
-  /* Scrollbar hide */
   .scrollbar-hide {
     -ms-overflow-style: none;
     scrollbar-width: none;
   }
-  .scrollbar-hide::-webkit-scrollbar {
-    display: none;
-  }
+  .scrollbar-hide::-webkit-scrollbar { display: none; }
 
-  /* Safe area for PWA bottom navigation */
-  .pb-safe {
-    padding-bottom: env(safe-area-inset-bottom, 16px);
-  }
+  .pb-safe { padding-bottom: env(safe-area-inset-bottom, 16px); }
+  .pt-safe { padding-top: env(safe-area-inset-top, 0px); }
+  .text-balance { text-wrap: balance; }
 
-  .pt-safe {
-    padding-top: env(safe-area-inset-top, 0px);
-  }
-
-  /* Text balance */
-  .text-balance {
-    text-wrap: balance;
-  }
-
-  /* Naira sign */
-  .naira::before {
-    content: '₦';
-  }
-
-  /* Gradient text */
-  .gradient-text {
-    @apply bg-clip-text text-transparent bg-gradient-to-r from-primary to-emerald-400;
-  }
-
-  /* Glass card effect (minimal) */
-  .glass-card {
-    @apply bg-white/80 backdrop-blur-sm border border-white/50;
-  }
-
-  /* Loading shimmer */
   .shimmer {
-    background: linear-gradient(
-      90deg,
-      #f0f0f0 25%,
-      #e0e0e0 50%,
-      #f0f0f0 75%
-    );
+    background: linear-gradient(90deg, #f0f0f0 25%, #e0e0e0 50%, #f0f0f0 75%);
     background-size: 200% 100%;
     animation: shimmer 1.5s infinite;
   }
-
-  @keyframes shimmer {
-    0% { background-position: 200% 0; }
-    100% { background-position: -200% 0; }
-  }
 }
 
-/* ── Animations ────────────────────────────────────────────── */
+/* ── Animations ─────────────────────────────────────────────── */
+@keyframes shimmer {
+  0% { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+
 @keyframes fadeInUp {
-  from {
-    opacity: 0;
-    transform: translateY(16px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
-}
-
-@keyframes scaleIn {
-  from {
-    opacity: 0;
-    transform: scale(0.95);
-  }
-  to {
-    opacity: 1;
-    transform: scale(1);
-  }
+  from { opacity: 0; transform: translateY(16px); }
+  to { opacity: 1; transform: translateY(0); }
 }
 
 .animate-fade-in-up {
   animation: fadeInUp 0.4s ease-out forwards;
 }
 
-.animate-scale-in {
-  animation: scaleIn 0.3s ease-out forwards;
-}
-
-/* Stagger children animations */
-.stagger-children > *:nth-child(1) { animation-delay: 0ms; }
-.stagger-children > *:nth-child(2) { animation-delay: 100ms; }
-.stagger-children > *:nth-child(3) { animation-delay: 200ms; }
-.stagger-children > *:nth-child(4) { animation-delay: 300ms; }
-.stagger-children > *:nth-child(5) { animation-delay: 400ms; }
-.stagger-children > *:nth-child(6) { animation-delay: 500ms; }
-
-/* ── Custom Scrollbar ──────────────────────────────────────── */
-::-webkit-scrollbar {
-  width: 6px;
-  height: 6px;
-}
-
-::-webkit-scrollbar-track {
-  background: transparent;
-}
-
-::-webkit-scrollbar-thumb {
-  background: #E5E7EB;
-  border-radius: 3px;
-}
-
-::-webkit-scrollbar-thumb:hover {
-  background: #D1D5DB;
-}
-
-/* ── Print Styles ──────────────────────────────────────────── */
-@media print {
-  .no-print {
-    display: none !important;
-  }
-
-  body {
-    background: white !important;
-  }
-}
+/* ── Custom Scrollbar ───────────────────────────────────────── */
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: #E5E7EB; border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: #D1D5DB; }

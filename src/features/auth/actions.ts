@@ -1,33 +1,26 @@
 "use server";
 
+// ============================================================
+// Auth Server Actions
+// "use server" files can ONLY export async functions — no
+// schemas, types, or plain objects exported from here.
+// Schemas/types live in ./schemas.ts
+// ============================================================
+
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { z } from "zod";
 import { createClient } from "@/lib/supabase/server";
-
-// ── Schemas ────────────────────────────────────────────────────
-export const SignUpSchema = z.object({
-  fullName: z.string().min(2, "Full name must be at least 2 characters"),
-  email: z.string().email("Invalid email address"),
-  password: z
-    .string()
-    .min(8, "Password must be at least 8 characters")
-    .regex(/[A-Z]/, "Password must contain an uppercase letter")
-    .regex(/[0-9]/, "Password must contain a number"),
-  phone: z.string().optional(),
-});
-
-export const SignInSchema = z.object({
-  email: z.string().email("Invalid email address"),
-  password: z.string().min(1, "Password is required"),
-});
-
-export type SignUpInput = z.infer<typeof SignUpSchema>;
-export type SignInInput = z.infer<typeof SignInSchema>;
-export type ActionResult = { success: boolean; error?: string; data?: unknown };
+import { SignUpSchema, SignInSchema } from "./schemas";
+import type { ActionResult } from "./schemas";
 
 // ── Sign Up ────────────────────────────────────────────────────
-export async function signUp(input: SignUpInput): Promise<ActionResult> {
+export async function signUp(input: {
+  fullName: string;
+  email: string;
+  password: string;
+  phone?: string;
+}): Promise<ActionResult<{ requiresConfirmation?: boolean }>> {
   const parsed = SignUpSchema.safeParse(input);
   if (!parsed.success) {
     return { success: false, error: parsed.error.errors[0].message };
@@ -44,7 +37,7 @@ export async function signUp(input: SignUpInput): Promise<ActionResult> {
         full_name: parsed.data.fullName,
         phone: parsed.data.phone ?? null,
       },
-      emailRedirectTo: `${appUrl}/auth/callback`,
+      emailRedirectTo: `${appUrl}/auth/callback?next=/onboarding`,
     },
   });
 
@@ -56,17 +49,17 @@ export async function signUp(input: SignUpInput): Promise<ActionResult> {
   }
 
   if (data.user && !data.session) {
-    return {
-      success: true,
-      data: { requiresConfirmation: true },
-    };
+    return { success: true, data: { requiresConfirmation: true } };
   }
 
   return { success: true };
 }
 
 // ── Sign In ────────────────────────────────────────────────────
-export async function signIn(input: SignInInput): Promise<ActionResult> {
+export async function signIn(input: {
+  email: string;
+  password: string;
+}): Promise<ActionResult> {
   const parsed = SignInSchema.safeParse(input);
   if (!parsed.success) {
     return { success: false, error: parsed.error.errors[0].message };
@@ -99,7 +92,7 @@ export async function signOut(): Promise<void> {
 
 // ── Magic Link ─────────────────────────────────────────────────
 export async function sendMagicLink(email: string): Promise<ActionResult> {
-  const parsed = z.string().email().safeParse(email);
+  const parsed = z.string().email("Invalid email address").safeParse(email);
   if (!parsed.success) {
     return { success: false, error: "Invalid email address." };
   }
@@ -109,7 +102,7 @@ export async function sendMagicLink(email: string): Promise<ActionResult> {
 
   const { error } = await supabase.auth.signInWithOtp({
     email: parsed.data,
-    options: { emailRedirectTo: `${appUrl}/auth/callback` },
+    options: { emailRedirectTo: `${appUrl}/auth/callback?next=/dashboard` },
   });
 
   if (error) return { success: false, error: error.message };
@@ -139,5 +132,6 @@ export async function updateProfile(input: {
   if (error) return { success: false, error: error.message };
 
   revalidatePath("/settings");
+  revalidatePath("/profile");
   return { success: true };
 }
