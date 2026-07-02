@@ -35,12 +35,13 @@ export default async function AITrustReportPage({ params }: { params: Promise<{ 
 
   const memberScores = (members ?? []).map((m: {
     id: string;
-    profiles: { full_name: string | null } | null;
-    trust_scores: { score: number; on_time_count: number; streak: number }[] | null;
+    profiles: { full_name: string | null }[] | { full_name: string | null } | null;
+    trust_scores: { score: number; on_time_count: number; streak: number }[] | { score: number; on_time_count: number; streak: number } | null;
   }) => {
     const ts = Array.isArray(m.trust_scores) ? m.trust_scores[0] : m.trust_scores;
+    const prof = Array.isArray(m.profiles) ? m.profiles[0] : m.profiles;
     return {
-      name: (m.profiles as { full_name: string | null } | null)?.full_name ?? "Member",
+      name: prof?.full_name ?? "Member",
       score: ts?.score ?? 100,
       streak: ts?.streak ?? 0,
     };
