@@ -27,8 +27,6 @@ export interface TokenizedCheckoutOrder {
 export async function createTokenizedCheckoutOrder(
   params: CreateTokenizedCheckoutParams
 ): Promise<TokenizedCheckoutOrder> {
-  const amountInKobo = Math.round(params.amountNGN * 100);
-
   const response = await nombaRequest<{ code: string; data: TokenizedCheckoutOrder }>(
     "/checkout/order",
     {
@@ -37,7 +35,7 @@ export async function createTokenizedCheckoutOrder(
       body: {
         order: {
           orderReference: params.orderReference,
-          amount: amountInKobo.toString(),
+          amount: params.amountNGN,  // NAIRA per hackathon channel Jul 3
           currency: "NGN",
           customerEmail: params.customerEmail,
           customerId: params.customerId,
@@ -73,8 +71,6 @@ export interface TokenizedChargeResult {
 export async function chargeTokenizedCard(
   params: ChargeTokenizedCardParams
 ): Promise<TokenizedChargeResult> {
-  const amountInKobo = Math.round(params.amountNGN * 100);
-
   const response = await nombaRequest<{ code: string; data: TokenizedChargeResult }>(
     "/checkout/tokenized-card-payment",
     {
@@ -82,7 +78,7 @@ export async function chargeTokenizedCard(
       accountId: PARENT_ACCOUNT_ID,
       body: {
         tokenKey: params.tokenKey,
-        amount: amountInKobo,
+        amount: params.amountNGN,  // NAIRA per hackathon channel Jul 3
         currency: "NGN",
         orderReference: params.orderReference,
         customerEmail: params.customerEmail,

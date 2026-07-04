@@ -22,6 +22,7 @@ const FALLBACK_BRANDS: Record<string, FallbackBrand> = {
   "Moniepoint MFB": { bg: "bg-blue-600", initials: "MP" },
   "Moniepoint": { bg: "bg-blue-600", initials: "MP" },
   "Nomba MFB": { bg: "bg-primary", initials: "NB" },
+  "Nombank MFB": { bg: "bg-primary", initials: "NB" },  // actual sandbox response
 };
 
 const sizeClasses = { sm: "w-8 h-8", md: "w-10 h-10", lg: "w-12 h-12" };

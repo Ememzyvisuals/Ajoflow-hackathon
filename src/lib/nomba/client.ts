@@ -1,11 +1,10 @@
 // ============================================================
 // AjoFlow – Nomba API Client
-// CONFIRMED CORRECT URLs (from hackathon channel):
-//   Sandbox:    https://sandbox.nomba.com/v1
-//   Production: https://api.nomba.com/v1
-// Checkout sandbox: https://sandbox.nomba.com/v1/checkout/order
-// Sub-accounts: Dashboard-only creation (NOT via API)
-// Architecture: Parent → ONE pre-created Sub Account → VAs
+// CONFIRMED from hackathon channel (July 3 2026):
+// - Token valid 30 min → cache 25 min
+// - accountId header ALWAYS = parent account id
+// - Sub-account id goes in PATH/BODY not header
+// - Sandbox: sandbox.nomba.com/v1
 // ============================================================
 
 import type { NombaTokenCache } from "@/types";
@@ -22,15 +21,12 @@ const CLIENT_SECRET = process.env.NOMBA_CLIENT_SECRET!;
 export const PARENT_ACCOUNT_ID = process.env.NOMBA_PARENT_ACCOUNT_ID!;
 export const SUB_ACCOUNT_ID = process.env.NOMBA_SUB_ACCOUNT_ID!;
 
-// In-memory token cache (single server instance)
 let tokenCache: NombaTokenCache | null = null;
 
-// ── Get / Refresh Token ──────────────────────────────────────
+// Token valid 30 min → cache 25 min to be safe
 export async function getNombaToken(): Promise<string> {
   const now = Date.now();
-
-  // Cache for 55 minutes (token valid 60 minutes)
-  if (tokenCache && tokenCache.expires_at > now + 5 * 60 * 1000) {
+  if (tokenCache && tokenCache.expires_at > now + 2 * 60 * 1000) {
     return tokenCache.access_token;
   }
 
@@ -38,7 +34,7 @@ export async function getNombaToken(): Promise<string> {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      accountId: PARENT_ACCOUNT_ID,
+      accountId: PARENT_ACCOUNT_ID, // ALWAYS parent
     },
     body: JSON.stringify({
       grant_type: "client_credentials",
@@ -58,19 +54,18 @@ export async function getNombaToken(): Promise<string> {
     throw new Error(`Nomba auth failed: ${data.description ?? JSON.stringify(data)}`);
   }
 
+  // Cache for 25 min (token valid 30 min per hackathon channel)
   tokenCache = {
     access_token: data.data.access_token,
-    expires_at: now + 55 * 60 * 1000,
+    expires_at: now + 25 * 60 * 1000,
   };
 
   return tokenCache.access_token;
 }
 
-// ── Base Request ─────────────────────────────────────────────
 export interface NombaRequestOptions {
   method?: "GET" | "POST" | "PUT" | "DELETE" | "PATCH";
   body?: unknown;
-  /** Override accountId header — defaults to PARENT_ACCOUNT_ID */
   accountId?: string;
 }
 
@@ -86,14 +81,12 @@ export async function nombaRequest<T = unknown>(
     headers: {
       "Content-Type": "application/json",
       Authorization: `Bearer ${token}`,
-      accountId,
+      accountId, // ALWAYS parent account id
     },
     cache: "no-store",
   };
 
-  if (body !== undefined) {
-    init.body = JSON.stringify(body);
-  }
+  if (body !== undefined) init.body = JSON.stringify(body);
 
   const res = await fetch(`${NOMBA_BASE_URL}${path}`, init);
   const text = await res.text();
@@ -102,7 +95,7 @@ export async function nombaRequest<T = unknown>(
   try {
     data = JSON.parse(text);
   } catch {
-    throw new NombaAPIError(`Non-JSON response: ${text}`, res.status, "PARSE_ERROR");
+    throw new NombaAPIError(`Non-JSON: ${text}`, res.status, "PARSE_ERROR");
   }
 
   if (!res.ok || (data.code && data.code !== "00")) {
@@ -117,21 +110,12 @@ export async function nombaRequest<T = unknown>(
 }
 
 export class NombaAPIError extends Error {
-  constructor(
-    message: string,
-    public readonly statusCode: number,
-    public readonly code: string
-  ) {
+  constructor(message: string, public readonly statusCode: number, public readonly code: string) {
     super(message);
     this.name = "NombaAPIError";
   }
 }
 
 export function getNombaEnv() {
-  return {
-    env: NOMBA_ENV,
-    baseUrl: NOMBA_BASE_URL,
-    parentAccountId: PARENT_ACCOUNT_ID,
-    subAccountId: SUB_ACCOUNT_ID,
-  };
+  return { env: NOMBA_ENV, baseUrl: NOMBA_BASE_URL, parentAccountId: PARENT_ACCOUNT_ID, subAccountId: SUB_ACCOUNT_ID };
 }

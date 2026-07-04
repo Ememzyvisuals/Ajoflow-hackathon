@@ -5,16 +5,10 @@ import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
-import { z } from "zod";
 import { Eye, EyeOff, Loader2, MailCheck, Sparkles } from "lucide-react";
-import { signIn, sendMagicLink } from "@/features/auth/actions";
+import { signIn } from "@/features/auth/actions";
+import { SignInSchema, type SignInInput } from "@/features/auth/schemas";
 import { createClient } from "@/lib/supabase/client";
-
-const schema = z.object({
-  email: z.string().email("Invalid email address"),
-  password: z.string().min(1, "Password is required"),
-});
-type FormData = z.infer<typeof schema>;
 
 function LoginForm() {
   const router = useRouter();
@@ -22,32 +16,42 @@ function LoginForm() {
   const redirectTo = searchParams.get("redirectTo") ?? "/dashboard";
   const [showPw, setShowPw] = useState(false);
   const [loading, setLoading] = useState(false);
-  const [magicLoading, setMagicLoading] = useState(false);
   const [googleLoading, setGoogleLoading] = useState(false);
+  const [magicLoading, setMagicLoading] = useState(false);
   const [serverError, setServerError] = useState("");
   const [magicSent, setMagicSent] = useState(false);
   const [magicEmail, setMagicEmail] = useState("");
 
-  const { register, handleSubmit, getValues, formState: { errors } } = useForm<FormData>({
-    resolver: zodResolver(schema),
+  const { register, handleSubmit, getValues, formState: { errors } } = useForm<SignInInput>({
+    resolver: zodResolver(SignInSchema),
   });
 
-  async function onSubmit(data: FormData) {
+  async function onSubmit(data: SignInInput) {
     setLoading(true); setServerError("");
     const result = await signIn(data);
     setLoading(false);
     if (result.success) { router.push(redirectTo); router.refresh(); }
-    else setServerError(result.error ?? "Sign in failed");
+    else setServerError(result.error ?? "Invalid email or password.");
   }
 
   async function handleMagicLink() {
     const email = getValues("email");
-    if (!email) { setServerError("Enter your email first."); return; }
-    setMagicLoading(true);
-    const result = await sendMagicLink(email);
-    setMagicLoading(false);
-    if (result.success) { setMagicSent(true); setMagicEmail(email); }
-    else setServerError(result.error ?? "Failed");
+    if (!email) { setServerError("Enter your email address first."); return; }
+    setMagicLoading(true); setServerError("");
+    try {
+      const res = await fetch("/api/auth/magic-link", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email }),
+      });
+      const data = await res.json();
+      if (data.success) { setMagicSent(true); setMagicEmail(email); }
+      else setServerError(data.error ?? "Failed to send magic link.");
+    } catch {
+      setServerError("Network error. Please try again.");
+    } finally {
+      setMagicLoading(false);
+    }
   }
 
   async function handleGoogle() {
@@ -56,22 +60,27 @@ function LoginForm() {
     const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? window.location.origin;
     await supabase.auth.signInWithOAuth({
       provider: "google",
-      options: { redirectTo: `${appUrl}/auth/callback?next=${redirectTo}` },
+      options: { redirectTo: `${appUrl}/auth/callback` },
     });
   }
 
   if (magicSent) return (
-    <div className="w-full max-w-md text-center">
-      <div className="w-16 h-16 bg-primary-light rounded-full flex items-center justify-center mx-auto mb-4"><MailCheck className="w-7 h-7 text-primary" /></div>
+    <div className="w-full max-w-sm text-center">
+      <div className="w-16 h-16 bg-primary-light rounded-full flex items-center justify-center mx-auto mb-5">
+        <MailCheck className="w-8 h-8 text-primary" />
+      </div>
       <h2 className="text-xl font-bold text-text mb-2">Check your inbox</h2>
-      <p className="text-text-secondary text-sm">Magic link sent to <strong>{magicEmail}</strong></p>
-      <button onClick={() => setMagicSent(false)} className="text-primary text-sm font-medium mt-4 hover:underline">← Back</button>
+      <p className="text-text-secondary text-sm leading-relaxed">
+        We sent a sign-in link to <strong>{magicEmail}</strong>. Click it to access your account.
+      </p>
+      <button onClick={() => setMagicSent(false)} className="text-primary text-sm font-medium mt-5 hover:underline">
+        ← Back
+      </button>
     </div>
   );
 
   return (
     <div className="w-full max-w-sm">
-      {/* Auth image section */}
       <div className="text-center mb-6">
         <div className="inline-flex items-center gap-2 mb-4">
           <div className="w-8 h-8 bg-primary rounded-lg flex items-center justify-center">
@@ -91,13 +100,13 @@ function LoginForm() {
         )}
         {searchParams.get("error") && (
           <div className="bg-red-50 border border-red-200 text-red-700 text-sm px-4 py-3 rounded-xl mb-4">
-            Authentication error. Please try again.
+            Authentication failed. Please try again.
           </div>
         )}
 
         <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
           <div>
-            <label className="block text-sm font-medium text-text mb-1.5">Email or phone number</label>
+            <label className="block text-sm font-medium text-text mb-1.5">Email address</label>
             <input {...register("email")} type="email" placeholder="john@email.com" className="form-input" autoComplete="email" />
             {errors.email && <p className="text-danger text-xs mt-1">{errors.email.message}</p>}
           </div>
@@ -116,10 +125,7 @@ function LoginForm() {
             </div>
             {errors.password && <p className="text-danger text-xs mt-1">{errors.password.message}</p>}
           </div>
-          <label className="flex items-center gap-2 cursor-pointer">
-            <input type="checkbox" className="rounded border-border text-primary w-4 h-4" />
-            <span className="text-sm text-text-secondary">Remember me</span>
-          </label>
+
           <button type="submit" disabled={loading} className="w-full bg-primary text-white font-semibold py-3 rounded-xl hover:bg-primary/90 transition-colors disabled:opacity-60 flex items-center justify-center gap-2">
             {loading && <Loader2 className="w-4 h-4 animate-spin" />} Log in
           </button>
@@ -127,13 +133,13 @@ function LoginForm() {
 
         <div className="relative my-5">
           <div className="absolute inset-0 flex items-center"><div className="w-full border-t border-border" /></div>
-          <div className="relative flex justify-center text-xs text-text-secondary bg-white px-3"><span>or continue with</span></div>
+          <div className="relative flex justify-center"><span className="bg-white px-3 text-xs text-text-secondary">or continue with</span></div>
         </div>
 
         <div className="space-y-3">
           <button onClick={handleGoogle} disabled={googleLoading} className="w-full flex items-center justify-center gap-3 border border-border rounded-xl py-2.5 text-sm font-medium text-text hover:bg-gray-50 transition-colors disabled:opacity-60">
             {googleLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : (
-              <svg viewBox="0 0 24 24" className="w-5 h-5">
+              <svg viewBox="0 0 24 24" className="w-5 h-5" aria-hidden="true">
                 <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/>
                 <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/>
                 <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"/>
@@ -143,7 +149,7 @@ function LoginForm() {
             Continue with Google
           </button>
           <button onClick={handleMagicLink} disabled={magicLoading} className="w-full flex items-center justify-center gap-3 border border-border rounded-xl py-2.5 text-sm font-medium text-text hover:bg-gray-50 transition-colors disabled:opacity-60">
-            {magicLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4" />}
+            {magicLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4 text-primary" />}
             Continue with Magic Link
           </button>
         </div>

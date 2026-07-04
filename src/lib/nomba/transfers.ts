@@ -18,7 +18,7 @@ export interface BankLookupResult {
 }
 
 export interface TransferParams {
-  amount: number;        // In NAIRA (we convert to kobo)
+  amount: number;
   accountNumber: string;
   bankCode: string;
   accountName: string;
@@ -58,15 +58,12 @@ export async function lookupBankAccount(
 export async function transferToBank(
   params: TransferParams
 ): Promise<TransferResult> {
-  // Convert NGN to Kobo
-  const amountInKobo = Math.round(params.amount * 100);
-
   const response = await nombaRequest<{ code: string; data: TransferResult }>(
     "/transfers/bank",
     {
       method: "POST",
       body: {
-        amount: amountInKobo,
+        amount: params.amountNGN,  // NAIRA per hackathon channel Jul 3
         accountNumber: params.accountNumber,
         bankCode: params.bankCode,
         accountName: params.accountName,

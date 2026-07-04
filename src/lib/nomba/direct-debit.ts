@@ -36,8 +36,6 @@ export interface MandateResult {
 export async function createDirectDebitMandate(
   params: CreateMandateParams
 ): Promise<MandateResult> {
-  const amountInKobo = Math.round(params.amountNGN * 100);
-
   const response = await nombaRequest<{ code: string; data: MandateResult }>(
     "/direct-debits",
     {
@@ -46,7 +44,7 @@ export async function createDirectDebitMandate(
       body: {
         accountNumber: params.accountNumber,
         bankCode: params.bankCode,
-        amount: amountInKobo,
+        amount: params.amountNGN,  // NAIRA per hackathon channel Jul 3
         frequency: params.frequency,
         startDate: params.startDate,
         endDate: params.endDate,
@@ -73,8 +71,6 @@ export async function chargeMandate(params: {
   amountNGN: number;
   narration?: string;
 }): Promise<{ transactionId: string; status: string }> {
-  const amountInKobo = Math.round(params.amountNGN * 100);
-
   const response = await nombaRequest<{ code: string; data: { transactionId: string; status: string } }>(
     "/direct-debits/debit-mandate",
     {
@@ -82,7 +78,7 @@ export async function chargeMandate(params: {
       accountId: PARENT_ACCOUNT_ID,
       body: {
         mandateId: params.mandateId,
-        amount: amountInKobo,
+        amount: params.amountNGN,  // NAIRA per hackathon channel Jul 3
         narration: params.narration ?? "AjoFlow Contribution",
       },
     }

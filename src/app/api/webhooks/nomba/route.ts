@@ -136,8 +136,8 @@ async function handleVirtualAccountFunded(
 ) {
   const { accountRef, amountReceived, transactionReference, senderName } = payload.data;
 
-  // Amount is in Kobo → convert to Naira
-  const amountNGN = amountReceived / 100;
+  // Amount confirmed in Naira (hackathon channel July 3 2026)
+  const amountNGN = amountReceived;
 
   // 1. Find virtual account by accountRef
   const { data: va } = await supabase
@@ -253,7 +253,7 @@ async function handlePaymentSuccess(
 ) {
   const orderRef = payload.data.order.orderReference;
   const amountKobo = payload.data.order.amount;
-  const amountNGN = amountKobo / 100;
+  const amountNGN = amountKobo; // Naira directly per hackathon channel confirmation
   const transactionId = payload.data.transaction.transactionId;
 
   // Find payment session by order reference

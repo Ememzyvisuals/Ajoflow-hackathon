@@ -1,18 +1,16 @@
 // ============================================================
-// AjoFlow – Nomba Checkout Service
-// Sandbox URL: https://sandbox.nomba.com/v1/checkout/order
-// Production:  https://api.nomba.com/v1/checkout/order
-// Amounts in KOBO (₦1 = 100 kobo)
-// tokenizeCard: true → enables card tokenization for recurring
-// Sandbox test card: 5060 6666 6666 6666 666 (any expiry, CVV)
-// Tokenization test: 5434621074252808, PIN 0000, OTP 000000
+// AjoFlow – Nomba Checkout
+// CONFIRMED from hackathon channel (July 3 2026):
+// "Nomba treats amount in NAIRA not kobo"
+// Multiple people confirmed — send amount in NAIRA directly
+// NO multiplication by 100
 // ============================================================
 
 import { nombaRequest, PARENT_ACCOUNT_ID } from "./client";
 
 export interface CreateCheckoutOrderParams {
   orderReference: string;
-  amountNGN: number;
+  amountNGN: number;       // Amount in NAIRA — sent as-is to Nomba
   customerEmail: string;
   customerId: string;
   callbackUrl: string;
@@ -26,16 +24,15 @@ export interface NombaCheckoutOrder {
   orderReference: string;
 }
 
-// ── Create Checkout Order ─────────────────────────────────────
 export async function createCheckoutOrder(
   params: CreateCheckoutOrderParams
 ): Promise<NombaCheckoutOrder> {
-  const amountInKobo = Math.round(params.amountNGN * 100);
-
+  // CONFIRMED: amount in NAIRA, not kobo
+  // "Nomba treats amount in naira not kobo" - hackathon channel July 3
   const body: Record<string, unknown> = {
     order: {
       orderReference: params.orderReference,
-      amount: amountInKobo.toString(),
+      amount: params.amountNGN,  // NAIRA directly — no conversion
       currency: "NGN",
       customerEmail: params.customerEmail,
       customerId: params.customerId,
@@ -48,23 +45,19 @@ export async function createCheckoutOrder(
     },
   };
 
-  // Add tokenizeCard if requested (for recurring contributions)
   if (params.tokenizeCard) {
     (body.order as Record<string, unknown>).tokenizeCard = true;
   }
 
   const response = await nombaRequest<{ code: string; data: NombaCheckoutOrder }>(
     "/checkout/order",
-    {
-      method: "POST",
-      accountId: PARENT_ACCOUNT_ID,
-      body,
-    }
+    { method: "POST", accountId: PARENT_ACCOUNT_ID, body }
   );
 
   return response.data;
 }
 
-// ── Kobo ↔ Naira Helpers ─────────────────────────────────────
-export const koboToNaira = (kobo: number): number => kobo / 100;
-export const nairaToKobo = (naira: number): number => Math.round(naira * 100);
+// Keep helpers for webhook payloads (Nomba webhooks still send amounts)
+// but based on confirmed community info, treat webhook amounts as NAIRA too
+export const nairaToDisplay = (n: number): string =>
+  `₦${n.toLocaleString("en-NG")}`;

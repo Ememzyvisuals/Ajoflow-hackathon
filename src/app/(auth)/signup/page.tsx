@@ -6,7 +6,7 @@ import { useRouter } from "next/navigation";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { Eye, EyeOff, Loader2, MailCheck, Sparkles } from "lucide-react";
-import { signUp, sendMagicLink } from "@/features/auth/actions";
+import { signUp } from "@/features/auth/actions";
 import { SignUpSchema, type SignUpInput } from "@/features/auth/schemas";
 import { createClient } from "@/lib/supabase/client";
 
@@ -48,12 +48,22 @@ export default function SignUpPage() {
 
   async function handleMagicLink() {
     const email = getValues("email");
-    if (!email) { setServerError("Enter your email address first, then click magic link."); return; }
+    if (!email) { setServerError("Enter your email address first."); return; }
     setMagicLoading(true); setServerError("");
-    const result = await sendMagicLink(email);
-    setMagicLoading(false);
-    if (result.success) { setMagicSent(true); setMagicEmail(email); }
-    else setServerError(result.error ?? "Failed to send magic link");
+    try {
+      const res = await fetch("/api/auth/magic-link", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email }),
+      });
+      const data = await res.json();
+      if (data.success) { setMagicSent(true); setMagicEmail(email); }
+      else setServerError(data.error ?? "Failed to send magic link.");
+    } catch {
+      setServerError("Network error. Please try again.");
+    } finally {
+      setMagicLoading(false);
+    }
   }
 
   // ── Email confirmed screen ────────────────────────────────────

@@ -395,7 +395,7 @@ export default function LandingPage() {
             </div>
           </div>
           <div className="border-t border-white/10 pt-8 flex flex-col md:flex-row justify-between items-center gap-4">
-            <p className="text-gray-500 text-sm">© 2024 AjoFlow. All rights reserved.</p>
+            <p className="text-gray-500 text-sm">© {new Date().getFullYear()} AjoFlow. All rights reserved.</p>
             <p className="text-gray-500 text-sm">Payments powered by <span className="text-gray-300">Nomba</span></p>
           </div>
         </div>

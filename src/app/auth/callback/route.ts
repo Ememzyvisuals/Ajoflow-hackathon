@@ -9,16 +9,26 @@ export async function GET(request: NextRequest) {
   if (code) {
     const supabase = await createClient();
     const { error } = await supabase.auth.exchangeCodeForSession(code);
+
     if (!error) {
-      const forwardedHost = request.headers.get("x-forwarded-host");
-      const isLocalEnv = process.env.NODE_ENV === "development";
-      if (isLocalEnv) {
-        return NextResponse.redirect(`${origin}${next}`);
-      } else if (forwardedHost) {
-        return NextResponse.redirect(`https://${forwardedHost}${next}`);
-      } else {
-        return NextResponse.redirect(`${origin}${next}`);
+      // Check if user has completed onboarding (phone set)
+      const { data: { user } } = await supabase.auth.getUser();
+
+      if (user) {
+        const { data: profile } = await supabase
+          .from("profiles")
+          .select("phone, full_name")
+          .eq("id", user.id)
+          .single();
+
+        // No phone = onboarding not done → always go to onboarding
+        if (!profile?.phone) {
+          return NextResponse.redirect(`${origin}/onboarding`);
+        }
       }
+
+      // Onboarding done → go to intended destination
+      return NextResponse.redirect(`${origin}${next}`);
     }
   }
 
