@@ -56,12 +56,23 @@ function LoginForm() {
 
   async function handleGoogle() {
     setGoogleLoading(true);
+    setServerError("");
     const supabase = createClient();
-    const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? window.location.origin;
-    await supabase.auth.signInWithOAuth({
+    // Always use the browser's actual origin — never NEXT_PUBLIC_APP_URL here.
+    // If the env var drifts from the real deployed domain, Supabase can't match
+    // redirectTo against its Redirect URLs allow-list and silently falls back
+    // to the Site URL (landing page), which is exactly the bug we're fixing.
+    const { error } = await supabase.auth.signInWithOAuth({
       provider: "google",
-      options: { redirectTo: `${appUrl}/auth/callback` },
+      options: {
+        redirectTo: `${window.location.origin}/auth/callback?next=${encodeURIComponent(redirectTo)}`,
+        queryParams: { access_type: "offline", prompt: "consent" },
+      },
     });
+    if (error) {
+      setGoogleLoading(false);
+      setServerError(error.message || "Could not start Google sign-in. Please try again.");
+    }
   }
 
   if (magicSent) return (

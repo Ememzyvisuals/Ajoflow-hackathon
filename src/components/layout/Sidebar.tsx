@@ -3,8 +3,8 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
-  LayoutDashboard, Users, CreditCard, Send, UserCheck,
-  Megaphone, BarChart2, Bell, Settings, LogOut, Sparkles
+  LayoutDashboard, Users, CreditCard, Send,
+  BarChart2, Bell, Settings, LogOut
 } from "lucide-react";
 import { cn, getInitials } from "@/lib/utils";
 import { signOut } from "@/features/auth/actions";
@@ -15,10 +15,7 @@ const navItems = [
   { href: "/groups", icon: Users, label: "Groups" },
   { href: "/contributions", icon: CreditCard, label: "Contributions" },
   { href: "/payouts", icon: Send, label: "Payouts" },
-  { href: "/members", icon: UserCheck, label: "Members" },
   { href: "/loans", icon: BarChart2, label: "Loans" },
-  { href: "/ai-assistant", icon: Sparkles, label: "AI Assistant" },
-  { href: "/announcements", icon: Megaphone, label: "Announcements" },
   { href: "/notifications", icon: Bell, label: "Notifications" },
   { href: "/settings", icon: Settings, label: "Settings" },
 ];

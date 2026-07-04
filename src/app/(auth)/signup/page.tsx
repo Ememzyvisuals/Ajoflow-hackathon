@@ -38,12 +38,19 @@ export default function SignUpPage() {
 
   async function handleGoogle() {
     setGoogleLoading(true);
+    setServerError("");
     const supabase = createClient();
-    const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? window.location.origin;
-    await supabase.auth.signInWithOAuth({
+    // Use window.location.origin, not NEXT_PUBLIC_APP_URL — a mismatch there
+    // causes Supabase to reject redirectTo and silently fall back to the
+    // Site URL (landing page) instead of /auth/callback.
+    const { error } = await supabase.auth.signInWithOAuth({
       provider: "google",
-      options: { redirectTo: `${appUrl}/auth/callback?next=/onboarding` },
+      options: { redirectTo: `${window.location.origin}/auth/callback?next=/onboarding` },
     });
+    if (error) {
+      setGoogleLoading(false);
+      setServerError(error.message || "Could not start Google sign-in. Please try again.");
+    }
   }
 
   async function handleMagicLink() {

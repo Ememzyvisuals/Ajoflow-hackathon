@@ -5,7 +5,8 @@ import { useRouter } from "next/navigation";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
-import { Loader2, Camera, CheckCircle } from "lucide-react";
+import { Loader2, CheckCircle } from "lucide-react";
+import AvatarUpload from "@/components/AvatarUpload";
 import { updateProfile } from "@/features/auth/actions";
 
 const schema = z.object({
@@ -85,16 +86,9 @@ export default function OnboardingPage() {
                   <h2 className="text-xl font-bold text-text mb-1">Set up your profile</h2>
                   <p className="text-text-secondary text-sm mb-6">This helps your group members identify you.</p>
 
-                  {/* Avatar placeholder */}
+                  {/* Avatar upload — real, wired to Supabase Storage */}
                   <div className="flex justify-center mb-6">
-                    <div className="relative">
-                      <div className="w-20 h-20 bg-primary-light rounded-full flex items-center justify-center text-primary text-3xl font-bold">
-                        {watch("fullName")?.[0]?.toUpperCase() ?? "?"}
-                      </div>
-                      <button type="button" className="absolute bottom-0 right-0 w-7 h-7 bg-primary rounded-full flex items-center justify-center shadow">
-                        <Camera className="w-3.5 h-3.5 text-white" />
-                      </button>
-                    </div>
+                    <AvatarUpload fallbackLetter={watch("fullName")?.[0]?.toUpperCase() ?? "?"} />
                   </div>
 
                   {error && (
