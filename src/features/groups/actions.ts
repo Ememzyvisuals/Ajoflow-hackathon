@@ -6,6 +6,7 @@ import { z } from "zod";
 import { createClient } from "@/lib/supabase/server";
 import { createServiceClient } from "@/lib/supabase/server";
 import { createVirtualAccount, buildAccountRef } from "@/lib/nomba/virtual-accounts";
+import { withTimeout } from "@/lib/timeout";
 
 // ── Schemas ────────────────────────────────────────────────────
 const CreateGroupSchema = z.object({
@@ -73,7 +74,7 @@ export async function createGroup(input: CreateGroupInput): Promise<ActionResult
     const accountRef = buildAccountRef(membership.id);
     const accountName = profile?.full_name ?? profile?.email ?? "AjoFlow Member";
 
-    const va = await createVirtualAccount({ accountRef, accountName });
+    const va = await withTimeout(createVirtualAccount({ accountRef, accountName }), 8000, "Virtual account creation");
 
     await serviceClient.from("member_virtual_accounts").insert({
       membership_id: membership.id,
@@ -245,7 +246,7 @@ export async function acceptGroupInvite(token: string): Promise<ActionResult<{ g
 
     const accountRef = buildAccountRef(membership.id);
     const accountName = profile?.full_name ?? "AjoFlow Member";
-    const va = await createVirtualAccount({ accountRef, accountName });
+    const va = await withTimeout(createVirtualAccount({ accountRef, accountName }), 8000, "Virtual account creation");
 
     await serviceClient.from("member_virtual_accounts").insert({
       membership_id: membership.id,

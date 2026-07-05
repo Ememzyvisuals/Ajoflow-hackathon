@@ -2,7 +2,9 @@
 // AjoFlow – Groq AI Multi-Endpoint Failover Router
 // Architecture: Primary → Secondary → Tertiary
 // Auto-failover on: rate limit / timeout / model unavailable
-// Models: llama-3.3-70b-versatile (free tier, English + Pidgin)
+// Models: openai/gpt-oss-120b primary, openai/gpt-oss-20b fallback (free tier, English + Pidgin)
+// Updated July 2026 — llama-3.3-70b-versatile & llama-3.1-8b-instant were
+// deprecated by Groq on the free/developer tier as of June 17, 2026.
 // ============================================================
 
 import Groq from "groq-sdk";
@@ -15,9 +17,12 @@ const GROQ_KEYS = [
 ].filter(Boolean) as string[];
 
 // Primary model — best for financial reasoning + Nigerian Pidgin
-const PRIMARY_MODEL = "llama-3.3-70b-versatile";
+// NOTE: llama-3.3-70b-versatile was deprecated by Groq (free/dev tier) on
+// June 17, 2026. Using their official recommended replacement.
+const PRIMARY_MODEL = "openai/gpt-oss-120b";
 // Fallback model — faster, lower rate limits
-const FALLBACK_MODEL = "llama-3.1-8b-instant";
+// llama-3.1-8b-instant was deprecated the same day; replacement below.
+const FALLBACK_MODEL = "openai/gpt-oss-20b";
 
 let keyIndex = 0;
 

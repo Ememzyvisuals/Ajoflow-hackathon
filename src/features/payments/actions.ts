@@ -7,6 +7,7 @@ import { createServiceClient } from "@/lib/supabase/server";
 import { createCheckoutOrder } from "@/lib/nomba/checkout";
 import { transferToBank, buildMerchantTxRef, lookupBankAccount } from "@/lib/nomba/transfers";
 import { generateOrderRef } from "@/lib/utils";
+import { withTimeout } from "@/lib/timeout";
 
 export type ActionResult<T = unknown> = { success: boolean; error?: string; data?: T };
 
@@ -115,16 +116,21 @@ export async function addPayoutAccount(
 
   const serviceClient = createServiceClient();
 
-  // Verify account via Nomba bank lookup
+  // Verify account via Nomba bank lookup — timeboxed so a slow/hung Nomba
+  // sandbox can never leave the "Verify & Save" button spinning forever.
   let accountName: string;
   try {
-    const lookup = await lookupBankAccount({
-      accountNumber: parsed.data.accountNumber,
-      bankCode: parsed.data.bankCode,
-    });
+    const lookup = await withTimeout(
+      lookupBankAccount({
+        accountNumber: parsed.data.accountNumber,
+        bankCode: parsed.data.bankCode,
+      }),
+      8000,
+      "Bank account lookup"
+    );
     accountName = lookup.accountName;
   } catch {
-    return { success: false, error: "Could not verify bank account. Please check the details." };
+    return { success: false, error: "Could not verify bank account. Please check the details and try again." };
   }
 
   // If setting as default, unset previous default

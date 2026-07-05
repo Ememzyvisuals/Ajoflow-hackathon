@@ -28,13 +28,18 @@ export default function AddPayoutAccountPage() {
     e.preventDefault();
     if (!form.bankCode || !form.accountNumber) { setError("Fill all fields"); return; }
     setLoading(true); setError("");
-    const result = await addPayoutAccount({ ...form });
-    setLoading(false);
-    if (result.success && result.data) {
-      setVerifiedName(result.data.accountName);
-      setTimeout(() => router.push("/wallet"), 1500);
-    } else {
-      setError(result.error ?? "Failed to add account");
+    try {
+      const result = await addPayoutAccount({ ...form });
+      if (result.success && result.data) {
+        setVerifiedName(result.data.accountName);
+        setTimeout(() => router.push("/wallet"), 1500);
+      } else {
+        setError(result.error ?? "Failed to add account");
+      }
+    } catch {
+      setError("Something went wrong verifying your account. Please try again.");
+    } finally {
+      setLoading(false);
     }
   }
 

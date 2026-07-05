@@ -1,6 +1,7 @@
 import { createClient } from "@/lib/supabase/server";
 import { ChevronRight } from "lucide-react";
 import Link from "next/link";
+import { ChangePasswordButton } from "./ChangePasswordButton";
 
 export default async function SettingsPage() {
   const supabase = await createClient();
@@ -35,27 +36,18 @@ export default async function SettingsPage() {
 
         <div className="dashboard-card">
           <h2 className="text-sm font-semibold text-text-secondary uppercase tracking-wide mb-3">Notifications</h2>
-          <div className="space-y-3">
-            {["Email notifications", "Push notifications", "Contribution reminders"].map((item) => (
-              <div key={item} className="flex items-center justify-between">
-                <span className="text-sm text-text">{item}</span>
-                <label className="relative inline-flex items-center cursor-pointer">
-                  <input type="checkbox" className="sr-only peer" defaultChecked />
-                  <div className="w-10 h-5 bg-gray-200 peer-focus:ring-2 peer-focus:ring-primary/20 rounded-full peer peer-checked:after:translate-x-5 peer-checked:bg-primary after:content-[''] after:absolute after:top-0.5 after:left-0.5 after:bg-white after:rounded-full after:h-4 after:w-4 after:transition-all" />
-                </label>
-              </div>
-            ))}
-          </div>
+          <p className="text-xs text-text-secondary mb-3">Notification preferences are on by default for now — per-channel controls are coming soon.</p>
         </div>
 
         <div className="dashboard-card">
           <h2 className="text-sm font-semibold text-text-secondary uppercase tracking-wide mb-3">Security</h2>
           <div className="divide-y divide-border">
-            {["Change Password", "Two-Factor Authentication", "Active Sessions"].map((item) => (
-              <button key={item} className="flex items-center justify-between py-3 w-full hover:bg-gray-50 -mx-2 px-2 rounded-lg transition-colors">
+            <ChangePasswordButton />
+            {["Two-Factor Authentication", "Active Sessions"].map((item) => (
+              <div key={item} className="flex items-center justify-between py-3 opacity-50 cursor-not-allowed">
                 <span className="text-sm text-text">{item}</span>
-                <ChevronRight className="w-4 h-4 text-text-secondary/40" />
-              </button>
+                <span className="text-xs text-text-secondary border border-border rounded-full px-2 py-0.5">Coming soon</span>
+              </div>
             ))}
           </div>
         </div>

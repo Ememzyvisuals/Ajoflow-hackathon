@@ -63,7 +63,7 @@ export async function transferToBank(
     {
       method: "POST",
       body: {
-        amount: params.amountNGN,  // NAIRA per hackathon channel Jul 3
+        amount: params.amount, // NAIRA per hackathon channel Jul 3
         accountNumber: params.accountNumber,
         bankCode: params.bankCode,
         accountName: params.accountName,
