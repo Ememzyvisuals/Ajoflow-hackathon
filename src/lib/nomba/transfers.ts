@@ -22,6 +22,7 @@ export interface TransferParams {
   accountNumber: string;
   bankCode: string;
   accountName: string;
+  senderName: string; // Required by Nomba — shows on the recipient's bank statement
   merchantTxRef: string; // Unique reference for idempotency
   narration?: string;
 }
@@ -67,6 +68,7 @@ export async function transferToBank(
         accountNumber: params.accountNumber,
         bankCode: params.bankCode,
         accountName: params.accountName,
+        senderName: params.senderName,
         merchantTxRef: params.merchantTxRef,
         narration: params.narration ?? "AjoFlow Payout",
       },

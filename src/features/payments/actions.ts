@@ -211,6 +211,7 @@ export async function approvePayout(payoutId: string): Promise<ActionResult> {
       accountNumber: payout.payout_accounts.account_number,
       bankCode: payout.payout_accounts.bank_code,
       accountName: payout.payout_accounts.account_name,
+      senderName: payout.groups.name ?? "AjoFlow",
       merchantTxRef,
       narration: `AjoFlow Payout – ${payout.groups.name}`,
     });

@@ -109,6 +109,7 @@ export async function GET() {
         accountNumber: TEST_ACCOUNT.accountNumber,
         bankCode: TEST_ACCOUNT.bankCode,
         accountName: data.accountName,
+        senderName: "AjoFlow Debug Test",
         merchantTxRef: buildMerchantTxRef(`debug-${Date.now()}`),
         narration: "AjoFlow debug transfer test",
       },
