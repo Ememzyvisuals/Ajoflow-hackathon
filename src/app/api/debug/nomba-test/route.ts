@@ -162,11 +162,13 @@ export async function GET() {
     if (keys.length === 0) throw new Error("No GROQ_KEY_1/2/3 environment variables set");
     const Groq = (await import("groq-sdk")).default;
     const client = new Groq({ apiKey: keys[0] });
-    const completion = await client.chat.completions.create({
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const completion = (await client.chat.completions.create({
       model: "openai/gpt-oss-120b",
       messages: [{ role: "user", content: "Reply with exactly: ok" }],
-      max_tokens: 10,
-    });
+      max_tokens: 60,
+      reasoning_effort: "low",
+    } as any)) as { choices: { message: { content: string | null } }[] };
     return { reply: completion.choices[0]?.message?.content, keys_configured: keys.length };
   }, 10000, "Groq chat completion");
   results.groq_ai = { ...groqResult, model: "openai/gpt-oss-120b", used_by: "AI Assistant + Group Trust Report" };

@@ -47,12 +47,17 @@ async function groqRequest(
     const key = keysToTry[(keyIndex + attempt) % keysToTry.length];
     try {
       const client = new Groq({ apiKey: key });
-      const completion = await client.chat.completions.create({
+      const completion = (await client.chat.completions.create({
         model,
         messages,
         max_tokens: maxTokens,
         temperature: 0.4,
-      });
+        // gpt-oss models spend tokens on internal reasoning before producing
+        // visible output — without this, short max_tokens budgets can be
+        // entirely consumed by reasoning, leaving an empty `content`.
+        reasoning_effort: "low",
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      } as any)) as { choices: { message: { content: string | null } }[] };
       keyIndex = (keyIndex + attempt + 1) % keysToTry.length;
       return completion.choices[0]?.message?.content ?? "";
     } catch (err: unknown) {
@@ -66,12 +71,14 @@ async function groqRequest(
       if (errMsg.includes("model") && model === PRIMARY_MODEL) {
         try {
           const client = new Groq({ apiKey: key });
-          const completion = await client.chat.completions.create({
+          const completion = (await client.chat.completions.create({
             model: FALLBACK_MODEL,
             messages,
             max_tokens: maxTokens,
             temperature: 0.4,
-          });
+            reasoning_effort: "low",
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      } as any)) as { choices: { message: { content: string | null } }[] };
           return completion.choices[0]?.message?.content ?? "";
         } catch {
           continue;

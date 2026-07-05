@@ -99,8 +99,14 @@ export async function nombaRequest<T = unknown>(
   }
 
   if (!res.ok || (data.code && data.code !== "00")) {
+    const detail =
+      (data.description as string) ??
+      (data.message as string) ??
+      (typeof data.error === "string" ? data.error : undefined) ??
+      (Array.isArray(data.errors) ? JSON.stringify(data.errors) : undefined) ??
+      text.slice(0, 300);
     throw new NombaAPIError(
-      (data.description as string) ?? `HTTP ${res.status}`,
+      `HTTP ${res.status}: ${detail}`,
       res.status,
       (data.code as string) ?? String(res.status)
     );
