@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import Link from "next/link";
-import { Share2, Send, Loader2, Megaphone, Users2 } from "lucide-react";
+import { Share2, Send, Loader2, Megaphone, Users2, LayoutGrid, CreditCard } from "lucide-react";
 import { formatNaira, getTrustScoreLabel, toPercent } from "@/lib/utils";
 import { createGroupPost } from "@/features/posts/actions";
 import { addComment } from "@/features/posts/comments";
@@ -67,12 +67,13 @@ export default function GroupTabs({
 
   return (
     <div>
-      <div className="flex gap-0 border-b border-border mb-5 overflow-x-auto scrollbar-hide">
+      {/* Desktop: top tab strip */}
+      <div className="hidden lg:flex gap-0 border-b border-border mb-5 overflow-x-auto scrollbar-hide">
         {([
-          ["overview", "Overview"],
-          ["contributions", "Contributions"],
-          ["members", "Members"],
-          ["posts", "Posts"],
+          ["overview", "Overview", LayoutGrid],
+          ["contributions", "Contributions", CreditCard],
+          ["members", "Members", Users2],
+          ["posts", "Posts", Megaphone],
         ] as const).map(([key, label]) => (
           <button
             key={key}
@@ -85,6 +86,33 @@ export default function GroupTabs({
           </button>
         ))}
       </div>
+
+      {/* Mobile: this group's own fixed bottom nav — takes the place of the
+          general MobileNav while inside a group, per the requested split
+          (general bottom nav outside a group, group-specific nav inside one) */}
+      <nav className="lg:hidden fixed bottom-0 left-0 right-0 z-40 bg-white border-t border-border pb-safe">
+        <div className="flex items-center justify-around px-1 h-16">
+          {([
+            ["overview", "Overview", LayoutGrid],
+            ["contributions", "Funds", CreditCard],
+            ["members", "Members", Users2],
+            ["posts", "Posts", Megaphone],
+          ] as const).map(([key, label, Icon]) => (
+            <button
+              key={key}
+              onClick={() => setTab(key)}
+              className={`flex flex-col items-center justify-center gap-1 flex-1 py-2 ${
+                tab === key ? "text-primary" : "text-text-secondary"
+              }`}
+            >
+              <Icon className="w-5 h-5" />
+              <span className="text-xs font-medium">{label}</span>
+            </button>
+          ))}
+        </div>
+      </nav>
+
+      <div className="pb-20 lg:pb-0">
 
       {tab === "overview" && (
         <>
@@ -218,6 +246,7 @@ export default function GroupTabs({
       {tab === "posts" && (
         <PostsTab groupId={groupId} posts={posts} isAdmin={isAdmin} />
       )}
+      </div>
     </div>
   );
 }

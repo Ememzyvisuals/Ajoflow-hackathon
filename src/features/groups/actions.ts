@@ -41,88 +41,112 @@ export async function createGroup(input: CreateGroupInput): Promise<ActionResult
     return { success: false, error: err instanceof Error ? err.message : "Server configuration error." };
   }
 
-  // 1. Create group
-  const { data: group, error: groupError } = await serviceClient
-    .from("groups")
-    .insert({
-      ...parsed.data,
-      admin_id: user.id,
-    })
-    .select()
-    .single();
-
-  if (groupError) return { success: false, error: groupError.message };
-
-  // 2. Add creator as owner membership
-  const { data: membership, error: memberError } = await serviceClient
-    .from("group_memberships")
-    .insert({
-      group_id: group.id,
-      user_id: user.id,
-      role: "owner",
-      position: 1,
-      status: "active",
-    })
-    .select()
-    .single();
-
-  if (memberError) return { success: false, error: memberError.message };
-
-  // 3. Create static virtual account for owner
   try {
-    const { data: profile } = await serviceClient
-      .from("profiles")
-      .select("full_name, email")
-      .eq("id", user.id)
+    // 1. Create group
+    const { data: group, error: groupError } = await serviceClient
+      .from("groups")
+      .insert({
+        name: parsed.data.name,
+        description: parsed.data.description,
+        rules: parsed.data.rules,
+        type: parsed.data.type,
+        contribution_amount: parsed.data.contribution_amount,
+        contribution_frequency: parsed.data.contribution_frequency,
+        payout_mode: parsed.data.payout_mode,
+        admin_id: user.id,
+      })
+      .select()
       .single();
 
-    const accountRef = buildAccountRef(membership.id);
-    const accountName = profile?.full_name ?? profile?.email ?? "AjoFlow Member";
+    if (groupError) return { success: false, error: groupError.message };
 
-    const va = await withTimeout(createVirtualAccount({ accountRef, accountName }), 8000, "Virtual account creation");
+    // 2. Add creator as owner membership
+    const { data: membership, error: memberError } = await serviceClient
+      .from("group_memberships")
+      .insert({
+        group_id: group.id,
+        user_id: user.id,
+        role: "owner",
+        position: 1,
+        status: "active",
+      })
+      .select()
+      .single();
 
-    await serviceClient.from("member_virtual_accounts").insert({
-      membership_id: membership.id,
-      account_number: va.bankAccountNumber,
-      bank_name: va.bankName,
-      account_reference: accountRef,
-      account_name: va.bankAccountName,
-      status: "active",
-    });
-  } catch (vaErr) {
-    console.error("[createGroup] VA creation failed (non-fatal):", vaErr);
-    // Non-fatal: group created, VA can be retried
+    if (memberError) return { success: false, error: memberError.message };
+
+    // 3. Create static virtual account for owner
+    try {
+      const { data: profile } = await serviceClient
+        .from("profiles")
+        .select("full_name, email")
+        .eq("id", user.id)
+        .single();
+
+      const accountRef = buildAccountRef(membership.id);
+      const accountName = profile?.full_name ?? profile?.email ?? "AjoFlow Member";
+
+      const va = await withTimeout(createVirtualAccount({ accountRef, accountName }), 8000, "Virtual account creation");
+
+      await serviceClient.from("member_virtual_accounts").insert({
+        membership_id: membership.id,
+        account_number: va.bankAccountNumber,
+        bank_name: va.bankName,
+        account_reference: accountRef,
+        account_name: va.bankAccountName,
+        status: "active",
+      });
+    } catch (vaErr) {
+      console.error("[createGroup] VA creation failed (non-fatal):", vaErr);
+      // Non-fatal: group created, VA can be retried
+    }
+
+    // 4. Create the first payment cycle — without this, the group would have
+    // no deadline/rotation data at all.
+    try {
+      const cycleStart = parsed.data.start_date ? new Date(parsed.data.start_date) : new Date();
+      const cycleEnd = new Date(cycleStart);
+      if (parsed.data.contribution_frequency === "daily") cycleEnd.setDate(cycleEnd.getDate() + 1);
+      else if (parsed.data.contribution_frequency === "weekly") cycleEnd.setDate(cycleEnd.getDate() + 7);
+      else cycleEnd.setMonth(cycleEnd.getMonth() + 1);
+
+      await serviceClient.from("payment_cycles").insert({
+        group_id: group.id,
+        name: "Round 1",
+        start_date: cycleStart.toISOString().slice(0, 10),
+        end_date: cycleEnd.toISOString().slice(0, 10),
+        status: "active",
+      });
+    } catch (cycleErr) {
+      console.error("[createGroup] Payment cycle creation failed (non-fatal):", cycleErr);
+      // Non-fatal: group created, cycle absence just means no deadline shown yet
+    }
+
+    // 5. Audit log — also non-fatal, group already exists at this point
+    try {
+      await serviceClient.from("audit_logs").insert({
+        user_id: user.id,
+        action: "GROUP_CREATED",
+        entity_type: "group",
+        entity_id: group.id,
+        metadata: { name: group.name, type: group.type },
+      });
+    } catch (auditErr) {
+      console.error("[createGroup] Audit log failed (non-fatal):", auditErr);
+    }
+
+    revalidatePath("/groups");
+    return { success: true, data: { groupId: group.id } };
+  } catch (err) {
+    // Catches any unexpected JS-level error (not a Supabase-returned error
+    // object) so it surfaces as a real, readable message instead of an
+    // opaque failure with no way to diagnose it.
+    console.error("[createGroup] Unexpected error:", err);
+    return {
+      success: false,
+      error: err instanceof Error ? `Unexpected error: ${err.message}` : "An unexpected error occurred while creating the group.",
+    };
   }
-
-  // 4. Create the first payment cycle — without this, the group would have
-  // no deadline/rotation data at all (nothing else in the codebase ever
-  // created one; the deadline countdown and "who's collecting" features
-  // would silently have nothing to show).
-  const cycleStart = parsed.data.start_date ? new Date(parsed.data.start_date) : new Date();
-  const cycleEnd = new Date(cycleStart);
-  if (parsed.data.contribution_frequency === "daily") cycleEnd.setDate(cycleEnd.getDate() + 1);
-  else if (parsed.data.contribution_frequency === "weekly") cycleEnd.setDate(cycleEnd.getDate() + 7);
-  else cycleEnd.setMonth(cycleEnd.getMonth() + 1);
-
-  await serviceClient.from("payment_cycles").insert({
-    group_id: group.id,
-    name: "Round 1",
-    start_date: cycleStart.toISOString().slice(0, 10),
-    end_date: cycleEnd.toISOString().slice(0, 10),
-    status: "active",
-  });
-
-  // 5. Audit log
-  await serviceClient.from("audit_logs").insert({
-    user_id: user.id,
-    action: "GROUP_CREATED",
-    entity_type: "group",
-    entity_id: group.id,
-    metadata: { name: group.name, type: group.type },
-  });
-
-  revalidatePath("/groups");
-  return { success: true, data: { groupId: group.id } };
 }
 
 // ── Update Group ───────────────────────────────────────────────

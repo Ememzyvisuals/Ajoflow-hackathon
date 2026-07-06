@@ -22,7 +22,7 @@ export default function MyVirtualAccountCard({ membershipId, groupId, initial }:
     const amt = Number(reportAmount);
     if (!amt || amt <= 0) return;
     setReportLoading(true);
-    const result = await reportPaymentIssue({ groupId, amount: amt });
+    const result = await reportPaymentIssue({ groupId, membershipId, amount: amt });
     setReportLoading(false);
     if (result.success) {
       setReportSent(true);
