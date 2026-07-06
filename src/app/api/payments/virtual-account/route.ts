@@ -11,7 +11,12 @@ export async function POST(request: NextRequest) {
   const { membershipId } = await request.json();
   if (!membershipId) return NextResponse.json({ error: "membershipId required" }, { status: 400 });
 
-  const serviceClient = createServiceClient();
+  let serviceClient: ReturnType<typeof createServiceClient>;
+  try {
+    serviceClient = createServiceClient();
+  } catch (err) {
+    return NextResponse.json({ success: false, error: err instanceof Error ? err.message : "Server configuration error." }, { status: 500 });
+  }
 
   // Check ownership
   const { data: membership } = await serviceClient

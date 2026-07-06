@@ -57,7 +57,7 @@ export interface PaymentSuccessWebhookPayload {
     transaction: {
       transactionId: string;
       type: "online_checkout";
-      transactionAmount: number;  // In Kobo
+      transactionAmount: number;  // In NAIRA, not Kobo — confirmed via hackathon channel
       fee: number;
       time: string;
     };
@@ -67,7 +67,7 @@ export interface PaymentSuccessWebhookPayload {
     };
     order: {
       orderReference: string;
-      amount: number;  // In Kobo
+      amount: number;  // In NAIRA, not Kobo — confirmed via hackathon channel
       currency: string;
       paymentMethod: "card_payment" | "bank_transfer";
       cardType?: string;
@@ -83,8 +83,8 @@ export interface VirtualAccountFundedPayload {
   data: {
     accountRef: string;       // The accountRef we set when creating the VA
     accountNumber: string;
-    amountReceived: number;   // In Kobo
-    amountExpected?: number;  // In Kobo (if expectedAmount was set)
+    amountReceived: number;   // In NAIRA, not Kobo — confirmed via hackathon channel
+    amountExpected?: number;  // In NAIRA, not Kobo (if expectedAmount was set)
     senderName?: string;
     senderAccountNumber?: string;
     senderBankName?: string;
@@ -101,7 +101,7 @@ export interface TransferSuccessPayload {
   data: {
     transactionId: string;
     merchantTxRef: string;   // The reference we provided
-    amount: number;          // In Kobo
+    amount: number;          // In NAIRA, not Kobo — confirmed via hackathon channel
     recipientAccountNumber: string;
     recipientBankName: string;
     time: string;

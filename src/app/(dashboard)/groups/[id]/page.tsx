@@ -27,7 +27,7 @@ export default async function GroupDetailPage({ params }: { params: Promise<{ id
 
   if (!membership) notFound();
 
-  const [membersRes, walletRes, contributionsRes, postsRes] = await Promise.all([
+  const [membersRes, walletRes, contributionsRes, postsRes, myVaRes, cycleRes] = await Promise.all([
     supabase
       .from("group_memberships")
       .select("id, role, user_id, position, profiles(full_name, avatar_url), trust_scores(score)")
@@ -43,16 +43,46 @@ export default async function GroupDetailPage({ params }: { params: Promise<{ id
       .limit(5),
     supabase
       .from("group_posts")
-      .select("id, type, content, pinned, created_at, profiles(full_name)")
+      .select("id, type, content, pinned, created_at, profiles(full_name), post_comments(id, content, created_at, profiles(full_name))")
       .eq("group_id", id)
       .order("created_at", { ascending: false })
       .limit(30),
+    supabase
+      .from("member_virtual_accounts")
+      .select("account_number, bank_name, account_name, status")
+      .eq("membership_id", membership.id)
+      .single(),
+    supabase
+      .from("payment_cycles")
+      .select("id, name, end_date, status")
+      .eq("group_id", id)
+      .eq("status", "active")
+      .order("end_date", { ascending: true })
+      .limit(1)
+      .single(),
   ]);
 
   const members = membersRes.data ?? [];
   const wallet = walletRes.data;
   const recentContributions = contributionsRes.data ?? [];
   const posts = postsRes.data ?? [];
+  const myVirtualAccount = myVaRes.data ?? null;
+  const activeCycle = cycleRes.data ?? null;
+
+  let nextPayout: { amount: number; profiles: { full_name: string | null } | null } | null = null;
+  if (activeCycle) {
+    const { data: payout } = await supabase
+      .from("payouts")
+      .select("amount, profiles:recipient_id(full_name)")
+      .eq("cycle_id", activeCycle.id)
+      .in("status", ["pending", "approved", "processing"])
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .single();
+    nextPayout = payout
+      ? { amount: payout.amount, profiles: Array.isArray(payout.profiles) ? payout.profiles[0] ?? null : payout.profiles }
+      : null;
+  }
 
   const { data: allContributions } = await supabase
     .from("contributions")
@@ -82,9 +112,9 @@ export default async function GroupDetailPage({ params }: { params: Promise<{ id
           </div>
         </div>
         {isAdmin && (
-          <button className="w-8 h-8 flex items-center justify-center rounded-xl hover:bg-gray-100">
+          <Link href={`/groups/${id}/edit`} className="w-8 h-8 flex items-center justify-center rounded-xl hover:bg-gray-100">
             <MoreHorizontal className="w-4 h-4 text-text-secondary" />
-          </button>
+          </Link>
         )}
       </div>
 
@@ -98,6 +128,11 @@ export default async function GroupDetailPage({ params }: { params: Promise<{ id
         paidAmount={paidAmount}
         pendingAmount={pendingAmount}
         isAdmin={isAdmin}
+        myVirtualAccount={myVirtualAccount}
+        membershipId={membership.id}
+        activeCycle={activeCycle}
+        nextPayout={nextPayout}
+        currentUserId={user!.id}
       />
     </div>
   );

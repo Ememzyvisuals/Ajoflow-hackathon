@@ -31,7 +31,30 @@ async function runTest<T>(fn: () => Promise<T>, timeoutMs = 8000, label = "reque
   }
 }
 
-export async function GET() {
+export async function GET(request: Request) {
+  // ── Hard safety gate ────────────────────────────────────────────
+  // This route creates real virtual accounts, real checkout orders, and
+  // executes a real bank transfer. It must NEVER be reachable once the
+  // platform is pointed at Nomba production — a public, unauthenticated
+  // URL that moves real money is a critical vulnerability, not a debug
+  // convenience. Delete this route entirely before your final production
+  // deploy if you don't need it anymore; until then, this gate protects it.
+  if (process.env.NOMBA_ENV === "production") {
+    return NextResponse.json(
+      { error: "This debug route is disabled when NOMBA_ENV=production. Delete this route before shipping to production." },
+      { status: 403 }
+    );
+  }
+
+  const providedSecret = new URL(request.url).searchParams.get("key");
+  const expectedSecret = process.env.DEBUG_ROUTE_SECRET;
+  if (!expectedSecret || providedSecret !== expectedSecret) {
+    return NextResponse.json(
+      { error: "Unauthorized. Set DEBUG_ROUTE_SECRET in your environment and pass it as ?key=... to use this route." },
+      { status: 401 }
+    );
+  }
+
   const env = getNombaEnv();
   const results: Record<string, unknown> = {
     environment: env,

@@ -3,6 +3,12 @@
   "devCommand": "next dev",
   "framework": "nextjs",
   "regions": ["iad1"],
+  "crons": [
+    {
+      "path": "/api/cron/check-overdue",
+      "schedule": "0 1 * * *"
+    }
+  ],
   "headers": [
     {
       "source": "/sw.js",

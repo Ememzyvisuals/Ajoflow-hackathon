@@ -10,7 +10,13 @@ export async function POST(request: NextRequest) {
   const { question } = await request.json();
   if (!question) return NextResponse.json({ error: "Question required" }, { status: 400 });
 
-  const serviceClient = createServiceClient();
+  let serviceClient: ReturnType<typeof createServiceClient>;
+  try {
+    serviceClient = createServiceClient();
+  } catch (err) {
+    console.error("[AI Ask] Service client init failed —", err instanceof Error ? err.message : err);
+    return NextResponse.json({ answer: "Sorry, I'm having trouble accessing your data right now. Please try again shortly." });
+  }
 
   const { data: profile } = await serviceClient.from("profiles").select("language").eq("id", user.id).single();
 

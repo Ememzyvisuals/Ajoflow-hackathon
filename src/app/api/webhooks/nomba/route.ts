@@ -7,7 +7,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import crypto from "crypto";
 import { createServiceClient } from "@/lib/supabase/server";
-import { recordOnTimePayment } from "@/features/trust/engine";
+import { recordOnTimePayment, recordLatePayment } from "@/features/trust/engine";
 import type { VirtualAccountFundedPayload, PaymentSuccessWebhookPayload } from "@/lib/nomba/webhook";
 
 const WEBHOOK_SECRET = process.env.NOMBA_WEBHOOK_SECRET!;
@@ -69,7 +69,19 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   const eventType = (payload.event_type ?? payload.eventType) as string;
   const requestId = (payload.requestId ?? payload.request_id ?? crypto.randomUUID()) as string;
 
-  const supabase = createServiceClient();
+  let supabase: ReturnType<typeof createServiceClient>;
+  try {
+    supabase = createServiceClient();
+  } catch (err) {
+    // This is the single most severe possible failure mode for this route:
+    // if it crashes here uncaught, EVERY webhook silently fails — no
+    // contribution or payout ever gets recorded, with no visible error
+    // anywhere except Vercel function logs. Log loudly and return 500 so
+    // Nomba's retry mechanism keeps trying until the env var is fixed,
+    // rather than the event being lost forever.
+    console.error("[Webhook] CRITICAL: service client init failed —", err instanceof Error ? err.message : err);
+    return NextResponse.json({ error: "Server configuration error" }, { status: 500 });
+  }
 
   // ── 3. Idempotency Check ────────────────────────────────────
   const { data: existingEvent } = await supabase
@@ -175,6 +187,16 @@ async function handleVirtualAccountFunded(
     return;
   }
 
+  // 3.5 Find the group's active payment cycle, to know the real due date
+  const { data: activeCycle } = await supabase
+    .from("payment_cycles")
+    .select("id, end_date")
+    .eq("group_id", membership.group_id)
+    .eq("status", "active")
+    .order("end_date", { ascending: true })
+    .limit(1)
+    .single();
+
   // 4. Create contribution record
   const { data: contribution, error: contribError } = await supabase
     .from("contributions")
@@ -183,6 +205,8 @@ async function handleVirtualAccountFunded(
       group_id: membership.group_id,
       amount: amountNGN,
       status: "paid",
+      due_date: activeCycle?.end_date ?? null,
+      cycle_id: activeCycle?.id ?? null,
       paid_at: new Date().toISOString(),
       transaction_reference: transactionReference,
       payment_method: "transfer",
@@ -213,8 +237,14 @@ async function handleVirtualAccountFunded(
       .eq("group_id", membership.group_id);
   }
 
-  // 6. Update trust score
-  await recordOnTimePayment(membership.id);
+  // 6. Update trust score — was previously always recordOnTimePayment
+  // regardless of actual timing; now genuinely checks the deadline.
+  const isLate = activeCycle?.end_date ? new Date() > new Date(activeCycle.end_date) : false;
+  if (isLate) {
+    await recordLatePayment(membership.id);
+  } else {
+    await recordOnTimePayment(membership.id);
+  }
 
   // 7. Notify member
   await supabase.from("notifications").insert({
@@ -288,6 +318,16 @@ async function handlePaymentSuccess(
 
   if (existingContrib) return;
 
+  // Find active cycle for real due date / late detection
+  const { data: activeCycle } = await supabase
+    .from("payment_cycles")
+    .select("id, end_date")
+    .eq("group_id", session.group_id)
+    .eq("status", "active")
+    .order("end_date", { ascending: true })
+    .limit(1)
+    .single();
+
   // Create contribution
   const { data: contribution, error } = await supabase
     .from("contributions")
@@ -296,6 +336,8 @@ async function handlePaymentSuccess(
       group_id: session.group_id,
       amount: amountNGN,
       status: "paid",
+      due_date: activeCycle?.end_date ?? null,
+      cycle_id: activeCycle?.id ?? null,
       paid_at: new Date().toISOString(),
       transaction_reference: orderRef,
       nomba_transaction_id: transactionId,
@@ -324,8 +366,13 @@ async function handlePaymentSuccess(
       .eq("group_id", session.group_id);
   }
 
-  // Trust score update
-  await recordOnTimePayment(session.membership_id);
+  // Trust score update — same late-detection fix as the transfer path above
+  const isLate = activeCycle?.end_date ? new Date() > new Date(activeCycle.end_date) : false;
+  if (isLate) {
+    await recordLatePayment(session.membership_id);
+  } else {
+    await recordOnTimePayment(session.membership_id);
+  }
 
   // Notify
   await supabase.from("notifications").insert({

@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { createClient } from "@/lib/supabase/server";
+import { getLoanEligibility } from "@/features/trust/engine";
 
 export type ActionResult<T = unknown> = { success: boolean; error?: string; data?: T };
 
@@ -41,6 +42,28 @@ export async function requestLoan(input: {
     return { success: false, error: "You're not an active member of this group." };
   }
 
+  // Trust-score-gated eligibility — getLoanEligibility existed with zero
+  // caller before this; now it actually gates real loan requests.
+  const [{ data: trustScore }, { data: group }] = await Promise.all([
+    supabase.from("trust_scores").select("score").eq("membership_id", membership.id).single(),
+    supabase.from("groups").select("contribution_amount").eq("id", parsed.data.groupId).single(),
+  ]);
+
+  const score = trustScore?.score ?? 100;
+  const eligibility = getLoanEligibility(score);
+
+  if (!eligibility.eligible) {
+    return { success: false, error: eligibility.reason };
+  }
+
+  const maxAmount = (group?.contribution_amount ?? 0) * eligibility.maxMultiplier;
+  if (maxAmount > 0 && parsed.data.amount > maxAmount) {
+    return {
+      success: false,
+      error: `Your trust score (${score}) qualifies you for up to ${eligibility.maxMultiplier}× your contribution amount (₦${maxAmount.toLocaleString()}). ${eligibility.reason}`,
+    };
+  }
+
   const { error } = await supabase.from("loan_requests").insert({
     group_id: parsed.data.groupId,
     member_id: user.id,
@@ -64,6 +87,14 @@ export async function decideLoan(
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return { success: false, error: "Not authenticated." };
 
+  const { data: loan } = await supabase
+    .from("loan_requests")
+    .select("*")
+    .eq("id", loanId)
+    .single();
+
+  if (!loan) return { success: false, error: "Loan not found." };
+
   const { error } = await supabase
     .from("loan_requests")
     .update({
@@ -74,6 +105,28 @@ export async function decideLoan(
     .eq("id", loanId);
 
   if (error) return { success: false, error: error.message };
+
+  // Notify the requester of the decision — this used to only exist in a
+  // dead duplicate of this function elsewhere in the codebase that no UI
+  // ever called; ported the behavior here where it actually runs.
+  await supabase.from("notifications").insert({
+    user_id: loan.member_id,
+    type: decision === "approved" ? "loan_approved" : "loan_rejected",
+    title: decision === "approved" ? "Loan Approved ✅" : "Loan Rejected",
+    message:
+      decision === "approved"
+        ? `Your loan request of ₦${Number(loan.amount).toLocaleString()} has been approved.`
+        : `Your loan request of ₦${Number(loan.amount).toLocaleString()} was not approved.`,
+    data: { loan_id: loanId, amount: loan.amount },
+  });
+
+  await supabase.from("audit_logs").insert({
+    user_id: user.id,
+    action: `LOAN_${decision.toUpperCase()}`,
+    entity_type: "loan_request",
+    entity_id: loanId,
+    metadata: { amount: loan.amount, group_id: loan.group_id },
+  });
 
   revalidatePath("/loans");
   return { success: true };

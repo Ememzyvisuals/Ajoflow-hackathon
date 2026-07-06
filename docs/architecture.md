@@ -20,6 +20,8 @@ graph TD
     M --> N[Primary Endpoint]
     M --> O[Secondary Endpoint]
     M --> P[Tertiary Endpoint]
+    Q[Vercel Cron - daily] --> R[/api/cron/check-overdue/]
+    R --> E
 ```
 
 ## Frontend Architecture
@@ -165,6 +167,12 @@ flowchart LR
     H -->|No| J[Silent update]
 ```
 
+**All three branches are now actually reachable.** For a while, every contribution — regardless of actual timing — was recorded as "on time" (the webhook handler called `recordOnTimePayment()` unconditionally), and the "Missed" branch had no caller anywhere in the codebase. Fixed:
+- The webhook handler and `manuallyRecordContribution()` now check the active cycle's `end_date` and call `recordLatePayment()` when a payment is genuinely late.
+- `/api/cron/check-overdue` (daily) is what actually reaches the "Missed" branch, for contributions nobody ever pays at all.
+
+`getLoanEligibility(score)` also reads from this same `trust_scores` table to gate loan requests — score < 40 is rejected, otherwise the requestable amount is capped at a multiplier of the group's contribution amount.
+
 ## Loan Approval Flow
 
 ```mermaid
@@ -193,7 +201,7 @@ sequenceDiagram
     DB->>DB: Check group_wallets.balance >= amount
     DB->>N: POST /transfers/bank/lookup
     N-->>DB: Verified account name
-    DB->>N: POST /transfers/bank (merchantTxRef=payoutId)
+    DB->>N: POST /transfers/bank (merchantTxRef=payoutId, senderName=group.name)
     N-->>DB: transactionId
     DB->>DB: UPDATE payouts.status=processing
     N->>DB: Webhook transfer.success
@@ -201,6 +209,32 @@ sequenceDiagram
     DB->>DB: UPDATE group_wallets.balance -= amount
     DB->>DB: Email + in-app notification
 ```
+
+`senderName` is a required Nomba field that was missing entirely from the original transfer call — every real payout would have failed with `HTTP 422`. `approvePayout()` itself also had no UI calling it for a while after being written; it's now surfaced as an "Awaiting Your Approval" list on the Payouts page.
+
+## Overdue Detection & Manual Reconciliation Flow
+
+```mermaid
+flowchart TD
+    A[Vercel Cron - daily] --> B[/api/cron/check-overdue/]
+    B --> C{Cycle end_date passed?}
+    C -->|No| Z[Skip]
+    C -->|Yes, 1-6 days| D[Mark contribution 'late']
+    C -->|Yes, 7+ days| E[Mark contribution 'failed', close cycle]
+    D --> F[recordLatePayment]
+    E --> G[recordMissedPayment]
+
+    H[Member: webhook never arrived] --> I[reportPaymentIssue]
+    I --> J[Notify group admins]
+    J --> K[Admin verifies in own bank app]
+    K --> L[manuallyRecordContribution]
+    L --> M[INSERT contributions - payment_method=manual]
+    L --> N[UPDATE group_wallets]
+    L --> O[recordOnTimePayment or recordLatePayment]
+    L --> P[INSERT audit_logs]
+```
+
+The right-hand path exists because of a platform-wide Nomba webhook reliability issue reported by multiple hackathon teams on July 5, 2026 — see `docs/nomba-integration.md` for the full account. It is a fallback, not a replacement for the webhook.
 
 ## Security Layer Diagram
 

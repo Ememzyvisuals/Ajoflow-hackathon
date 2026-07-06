@@ -48,6 +48,15 @@ export default async function DashboardPage() {
       }, 0) / memberships.length)
     : 100;
 
+  const groupIdsForReminders = memberships.map((m: { groups: { id: string } }) => m.groups.id);
+  const { data: activeCycles } = await supabase
+    .from("payment_cycles")
+    .select("group_id, end_date")
+    .in("group_id", groupIdsForReminders.length > 0 ? groupIdsForReminders : ["none"])
+    .eq("status", "active");
+
+  const cycleByGroup = new Map((activeCycles ?? []).map((c: { group_id: string; end_date: string }) => [c.group_id, c.end_date]));
+
   const hour = new Date().getHours();
   const greeting = hour < 12 ? "Good morning" : hour < 17 ? "Good afternoon" : "Good evening";
   const firstName = profile?.full_name?.split(" ")[0] ?? "there";
@@ -149,15 +158,23 @@ export default async function DashboardPage() {
         <div className="dashboard-card mb-5">
           <div className="section-header"><p className="font-semibold text-text">Upcoming Reminders</p></div>
           <div className="space-y-3">
-            {memberships.slice(0, 3).map((m: { id: string; groups: { id: string; name: string; contribution_amount: number } }) => (
-              <div key={m.id} className="flex items-center justify-between py-2 border-b border-border last:border-0">
-                <div>
-                  <p className="text-sm font-medium text-text">{m.groups.name}</p>
-                  <p className="text-xs text-text-secondary">Payment due in 3 days · {formatNaira(m.groups.contribution_amount)}</p>
+            {memberships.slice(0, 3).map((m: { id: string; groups: { id: string; name: string; contribution_amount: number } }) => {
+              const endDate = cycleByGroup.get(m.groups.id);
+              const daysLeft = endDate ? Math.ceil((new Date(endDate).getTime() - Date.now()) / 86400000) : null;
+              const dueLabel =
+                daysLeft === null ? "No active cycle" :
+                daysLeft > 0 ? `Payment due in ${daysLeft} day${daysLeft === 1 ? "" : "s"}` :
+                "Payment overdue";
+              return (
+                <div key={m.id} className="flex items-center justify-between py-2 border-b border-border last:border-0">
+                  <div>
+                    <p className="text-sm font-medium text-text">{m.groups.name}</p>
+                    <p className="text-xs text-text-secondary">{dueLabel} · {formatNaira(m.groups.contribution_amount)}</p>
+                  </div>
+                  <Link href={`/groups/${m.groups.id}`} className="bg-primary text-white text-xs font-semibold px-3 py-1.5 rounded-lg hover:bg-primary/90 transition-colors">Pay Now</Link>
                 </div>
-                <Link href={`/groups/${m.groups.id}`} className="bg-primary text-white text-xs font-semibold px-3 py-1.5 rounded-lg hover:bg-primary/90 transition-colors">Pay Now</Link>
-              </div>
-            ))}
+              );
+            })}
           </div>
           <Link href="/contributions" className="flex items-center gap-1 text-primary text-sm font-medium mt-3 hover:underline">View all reminders <ArrowRight className="w-3.5 h-3.5" /></Link>
         </div>

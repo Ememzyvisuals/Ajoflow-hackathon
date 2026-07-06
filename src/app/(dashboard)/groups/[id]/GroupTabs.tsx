@@ -5,16 +5,23 @@ import Link from "next/link";
 import { Share2, Send, Loader2, Megaphone, Users2 } from "lucide-react";
 import { formatNaira, getTrustScoreLabel, toPercent } from "@/lib/utils";
 import { createGroupPost } from "@/features/posts/actions";
+import { addComment } from "@/features/posts/comments";
+import { removeMember } from "@/features/groups/actions";
+import { manuallyRecordContribution } from "@/features/payments/reconciliation";
 import GenerateInviteButton from "./GenerateInviteButton";
+import MyVirtualAccountCard from "./MyVirtualAccountCard";
+import { useRouter } from "next/navigation";
 
 type Member = {
   id: string; role: string; user_id: string; position: number;
   profiles: { full_name: string | null; avatar_url: string | null } | { full_name: string | null; avatar_url: string | null }[] | null;
   trust_scores: { score: number }[] | { score: number } | null;
 };
+type Comment = { id: string; content: string; created_at: string; profiles: { full_name: string | null } | null };
 type Post = {
   id: string; type: string; content: string; pinned: boolean; created_at: string;
   profiles: { full_name: string | null } | null;
+  post_comments?: Comment[];
 };
 
 function oneOf<T>(v: T | T[] | null): T | null {
@@ -31,6 +38,11 @@ export default function GroupTabs({
   paidAmount,
   pendingAmount,
   isAdmin,
+  myVirtualAccount,
+  membershipId,
+  activeCycle,
+  nextPayout,
+  currentUserId,
 }: {
   groupId: string;
   group: { contribution_amount: number };
@@ -43,6 +55,11 @@ export default function GroupTabs({
   paidAmount: number;
   pendingAmount: number;
   isAdmin: boolean;
+  myVirtualAccount: { account_number: string; bank_name: string; account_name: string; status: string } | null;
+  membershipId: string;
+  activeCycle: { id: string; name: string; end_date: string } | null;
+  nextPayout: { amount: number; profiles: { full_name: string | null } | null } | null;
+  currentUserId: string;
 }) {
   const [tab, setTab] = useState<"overview" | "contributions" | "members" | "posts">("overview");
   const totalExpected = paidAmount + pendingAmount;
@@ -71,6 +88,10 @@ export default function GroupTabs({
 
       {tab === "overview" && (
         <>
+          <MyVirtualAccountCard membershipId={membershipId} groupId={groupId} initial={myVirtualAccount} />
+
+          {activeCycle && <DeadlineCard cycle={activeCycle} nextPayout={nextPayout} />}
+
           <div className="grid grid-cols-2 gap-3 mb-5">
             <div className="stat-card text-center">
               <p className="text-xl font-bold text-text">{members.length}</p>
@@ -175,18 +196,19 @@ export default function GroupTabs({
               const info = getTrustScoreLabel(score);
               const name = profile?.full_name ?? "Member";
               return (
-                <div key={m.id} className="bg-white rounded-2xl border border-border p-4 flex items-center gap-3">
-                  <div className="w-10 h-10 bg-primary-light rounded-full flex items-center justify-center text-primary font-bold text-sm flex-shrink-0">
-                    {name[0]?.toUpperCase() ?? "?"}
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2">
-                      <p className="text-sm font-semibold text-text">{name}</p>
-                      {["owner", "admin"].includes(m.role) && <span className="text-xs text-text-secondary">Admin</span>}
-                    </div>
-                    <p className={`text-xs font-semibold ${info.color}`}>Trust score: {score}%</p>
-                  </div>
-                </div>
+                <MemberRow
+                  key={m.id}
+                  name={name}
+                  role={m.role}
+                  score={score}
+                  scoreColor={info.color}
+                  canRemove={isAdmin && m.user_id !== currentUserId}
+                  canRecordPayment={isAdmin}
+                  groupId={groupId}
+                  userId={m.user_id}
+                  targetMembershipId={m.id}
+                  contributionAmount={group.contribution_amount}
+                />
               );
             })
           )}
@@ -260,14 +282,217 @@ function PostsTab({ groupId, posts, isAdmin }: { groupId: string; posts: Post[];
       ) : (
         <div className="space-y-3">
           {posts.map((post) => (
-            <div key={post.id} className="dashboard-card">
-              <div className="flex items-center gap-2 mb-2">
-                <p className="text-sm font-semibold text-text">{post.profiles?.full_name ?? "Member"}</p>
-                {post.type === "announcement" && <span className="badge bg-primary-light text-primary text-xs">Announcement</span>}
+            <PostCard key={post.id} post={post} groupId={groupId} />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function PostCard({ post, groupId }: { post: Post; groupId: string }) {
+  const [showReply, setShowReply] = useState(false);
+  const [reply, setReply] = useState("");
+  const [loading, setLoading] = useState(false);
+  const comments = [...(post.post_comments ?? [])].sort(
+    (a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
+  );
+
+  async function submitReply() {
+    if (!reply.trim()) return;
+    setLoading(true);
+    const result = await addComment({ postId: post.id, content: reply, groupId });
+    setLoading(false);
+    if (result.success) {
+      setReply("");
+      setShowReply(false);
+    }
+  }
+
+  return (
+    <div className="dashboard-card">
+      <div className="flex items-center gap-2 mb-2">
+        <p className="text-sm font-semibold text-text">{post.profiles?.full_name ?? "Member"}</p>
+        {post.type === "announcement" && <span className="badge bg-primary-light text-primary text-xs">Announcement</span>}
+      </div>
+      <p className="text-sm text-text leading-relaxed">{post.content}</p>
+
+      {comments.length > 0 && (
+        <div className="mt-3 pt-3 border-t border-border/50 space-y-2">
+          {comments.map((c) => (
+            <div key={c.id} className="flex gap-2">
+              <div className="w-6 h-6 bg-gray-100 rounded-full flex items-center justify-center text-[10px] font-bold text-text-secondary flex-shrink-0">
+                {c.profiles?.full_name?.[0]?.toUpperCase() ?? "?"}
               </div>
-              <p className="text-sm text-text leading-relaxed">{post.content}</p>
+              <div>
+                <p className="text-xs font-semibold text-text">{c.profiles?.full_name ?? "Member"}</p>
+                <p className="text-sm text-text">{c.content}</p>
+              </div>
             </div>
           ))}
+        </div>
+      )}
+
+      {/* Announcements are read-only — only discussions ("post") get a reply box */}
+      {post.type === "post" && (
+        <div className="mt-3 pt-3 border-t border-border/50">
+          {showReply ? (
+            <div className="flex gap-2">
+              <input
+                value={reply}
+                onChange={(e) => setReply(e.target.value)}
+                placeholder="Write a reply..."
+                className="form-input flex-1 py-2 text-sm"
+                onKeyDown={(e) => e.key === "Enter" && submitReply()}
+              />
+              <button onClick={submitReply} disabled={loading || !reply.trim()} className="bg-primary text-white rounded-lg px-3 disabled:opacity-60">
+                {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
+              </button>
+            </div>
+          ) : (
+            <button onClick={() => setShowReply(true)} className="text-xs text-text-secondary hover:text-primary transition-colors font-medium">
+              Reply {comments.length > 0 && `(${comments.length})`}
+            </button>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function DeadlineCard({
+  cycle,
+  nextPayout,
+}: {
+  cycle: { name: string; end_date: string };
+  nextPayout: { amount: number; profiles: { full_name: string | null } | null } | null;
+}) {
+  const daysLeft = Math.ceil((new Date(cycle.end_date).getTime() - Date.now()) / 86400000);
+  const urgent = daysLeft <= 3;
+
+  return (
+    <div className={`dashboard-card mb-4 border-2 ${urgent ? "border-danger/30 bg-red-50/40" : "border-primary/20"}`}>
+      <div className="flex items-center justify-between mb-2">
+        <p className="text-xs font-medium text-text-secondary">{cycle.name}</p>
+        <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${urgent ? "bg-danger/10 text-danger" : "bg-primary-light text-primary"}`}>
+          {daysLeft > 0 ? `${daysLeft} day${daysLeft === 1 ? "" : "s"} left` : "Deadline passed"}
+        </span>
+      </div>
+      {nextPayout ? (
+        <p className="text-sm text-text">
+          <span className="font-semibold">{nextPayout.profiles?.full_name ?? "A member"}</span> is collecting{" "}
+          <span className="font-semibold">{formatNaira(nextPayout.amount)}</span> this round.
+        </p>
+      ) : (
+        <p className="text-sm text-text-secondary">Next payout recipient hasn't been assigned yet.</p>
+      )}
+    </div>
+  );
+}
+
+function MemberRow({
+  name,
+  role,
+  score,
+  scoreColor,
+  canRemove,
+  canRecordPayment,
+  groupId,
+  userId,
+  targetMembershipId,
+  contributionAmount,
+}: {
+  name: string;
+  role: string;
+  score: number;
+  scoreColor: string;
+  canRemove: boolean;
+  canRecordPayment: boolean;
+  groupId: string;
+  userId: string;
+  targetMembershipId: string;
+  contributionAmount: number;
+}) {
+  const router = useRouter();
+  const [confirming, setConfirming] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+  const [recordOpen, setRecordOpen] = useState(false);
+  const [recordLoading, setRecordLoading] = useState(false);
+
+  async function handleRemove() {
+    setLoading(true);
+    setError("");
+    const result = await removeMember(groupId, userId);
+    setLoading(false);
+    if (result.success) {
+      router.refresh();
+    } else {
+      setError(result.error ?? "Failed to remove member.");
+      setConfirming(false);
+    }
+  }
+
+  async function handleRecordPayment() {
+    setRecordLoading(true);
+    setError("");
+    const result = await manuallyRecordContribution({
+      groupId,
+      membershipId: targetMembershipId,
+      amount: contributionAmount,
+    });
+    setRecordLoading(false);
+    if (result.success) {
+      setRecordOpen(false);
+      router.refresh();
+    } else {
+      setError(result.error ?? "Failed to record payment.");
+    }
+  }
+
+  return (
+    <div className="bg-white rounded-2xl border border-border p-4">
+      <div className="flex items-center gap-3">
+        <div className="w-10 h-10 bg-primary-light rounded-full flex items-center justify-center text-primary font-bold text-sm flex-shrink-0">
+          {name[0]?.toUpperCase() ?? "?"}
+        </div>
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-2">
+            <p className="text-sm font-semibold text-text">{name}</p>
+            {["owner", "admin"].includes(role) && <span className="text-xs text-text-secondary">Admin</span>}
+          </div>
+          <p className={`text-xs font-semibold ${scoreColor}`}>Trust score: {score}%</p>
+          {error && <p className="text-danger text-xs mt-1">{error}</p>}
+        </div>
+        <div className="flex flex-col items-end gap-1 flex-shrink-0">
+          {canRemove && (
+            confirming ? (
+              <div className="flex gap-1.5">
+                <button onClick={() => setConfirming(false)} className="text-xs text-text-secondary px-2 py-1">Cancel</button>
+                <button onClick={handleRemove} disabled={loading} className="text-xs bg-danger text-white px-2 py-1 rounded-lg disabled:opacity-60">
+                  {loading ? "..." : "Confirm"}
+                </button>
+              </div>
+            ) : (
+              <button onClick={() => setConfirming(true)} className="text-xs text-danger hover:underline">Remove</button>
+            )
+          )}
+          {canRecordPayment && !recordOpen && (
+            <button onClick={() => setRecordOpen(true)} className="text-xs text-primary hover:underline">Record Payment</button>
+          )}
+        </div>
+      </div>
+      {recordOpen && (
+        <div className="mt-3 pt-3 border-t border-border/50 flex items-center justify-between">
+          <p className="text-xs text-text-secondary">
+            Mark {formatNaira(contributionAmount)} as paid for this cycle? Only do this if you've verified the transfer landed in your bank app.
+          </p>
+          <div className="flex gap-1.5 flex-shrink-0 ml-3">
+            <button onClick={() => setRecordOpen(false)} className="text-xs text-text-secondary px-2 py-1">Cancel</button>
+            <button onClick={handleRecordPayment} disabled={recordLoading} className="text-xs bg-primary text-white px-2 py-1 rounded-lg disabled:opacity-60">
+              {recordLoading ? "..." : "Confirm"}
+            </button>
+          </div>
         </div>
       )}
     </div>

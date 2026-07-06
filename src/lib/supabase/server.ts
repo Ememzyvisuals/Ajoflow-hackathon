@@ -29,9 +29,17 @@ export async function createClient() {
 // ── Service Role Client (server-side only, bypasses RLS) ──────
 export function createServiceClient() {
   const { createClient: createSSRClient } = require("@supabase/ssr");
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  if (!url || !key) {
+    throw new Error(
+      "SUPABASE_SERVICE_ROLE_KEY or NEXT_PUBLIC_SUPABASE_URL is missing on this deployment. " +
+      "Check Vercel → Settings → Environment Variables → Production."
+    );
+  }
   return createSSRClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.SUPABASE_SERVICE_ROLE_KEY!,
+    url,
+    key,
     {
       cookies: {
         getAll: () => [],

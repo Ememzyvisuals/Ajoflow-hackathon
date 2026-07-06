@@ -212,7 +212,7 @@ Signup (email/password | Google OAuth | Magic Link)
 ```
 Admin creates group
   → group_memberships row (role: owner)
-  → member_virtual_accounts row (Nomba VA created)
+  → member_virtual_accounts row (Nomba VA created, non-fatal on failure)
   → trust_scores row (auto, score: 100)
   → group_wallets row (auto, balance: 0)
 
@@ -222,6 +222,7 @@ Invitee clicks link → signs up/logs in → acceptGroupInvite()
   → member_virtual_accounts row (Nomba VA created)
   → Admins notified
 ```
+Each member's own virtual account (account number + bank name, copy-to-clipboard) is shown on their group page. If VA creation failed non-fatally (e.g. sandbox's 2-account-per-holder cap), a "Generate My Account" button retries it via `POST /api/payments/virtual-account`.
 
 ### Contribution Flow (Bank Transfer)
 ```
@@ -230,34 +231,49 @@ Member transfers to their static Virtual Account
   → HMAC signature verified
   → requestId checked against webhook_events (idempotency)
   → accountRef → membership_id → group_id resolved
-  → contributions row created (status: paid)
+  → Group's active payment_cycles.end_date checked
+  → contributions row created (status: paid, due_date/cycle_id populated)
   → group_wallets.balance incremented
-  → trust_scores recalculated (+3 on-time, +1 streak)
+  → trust_scores recalculated: on-time (+3, +1 streak) if before deadline,
+    late (-5, streak reset) if after — this branch used to never trigger;
+    every payment was scored on-time regardless of actual timing
   → notifications row created
   → audit_logs row created
 ```
+
+**If the webhook never arrives** (see "Known Nomba Platform Issue" below): the member can report it via "Sent money but it's not showing?" on their virtual account card, which notifies the group admin. The admin can then verify in their own bank app and record it manually — same wallet/trust-score/audit-log effects, tagged `payment_method: manual` so it's distinguishable from a webhook-confirmed payment.
 
 ### Contribution Flow (Card / Checkout)
 ```
 Member taps "Pay Now"
   → Server Action creates payment_sessions row
-  → Nomba checkout order created (amount in Kobo)
+  → Nomba checkout order created (amount in NAIRA — not Kobo)
   → Member redirected to Nomba hosted checkout
   → Nomba fires payment_success webhook
-  → Same reconciliation pipeline as above
+  → Same reconciliation pipeline as above, same on-time/late check
 ```
+
+### Overdue Detection (Cron)
+```
+Vercel Cron → GET /api/cron/check-overdue (daily, CRON_SECRET-protected)
+  → For every active cycle past its end_date:
+      1–6 days overdue, unpaid  → contribution marked 'late', recordLatePayment()
+      7+ days overdue, unpaid   → contribution marked 'failed', recordMissedPayment(), cycle closed
+```
+This is what makes `recordLatePayment()`/`recordMissedPayment()` reachable at all — before this cron job existed, both functions were fully implemented with zero caller anywhere in the codebase, meaning trust scores could only ever increase.
 
 ### Payout Flow
 ```
-Admin reviews payout queue → approves
+Admin reviews payout queue → approves (UI: "Awaiting Your Approval" on Payouts page)
   → group_wallets.balance checked (must cover amount)
   → Nomba bank lookup verifies recipient account name
-  → Nomba transfer initiated (merchantTxRef = payout_id)
+  → Nomba transfer initiated (merchantTxRef = payout_id, senderName = group name)
   → transfer.success webhook confirms
   → payouts.status = paid
   → group_wallets.balance decremented
   → Recipient notified + emailed
 ```
+`senderName` is a required Nomba field — omitting it fails with `HTTP 422: senderName must not be blank`, a real bug caught via the debug route. The approval UI itself didn't exist for a while: `approvePayout()` was fully implemented with no page calling it, meaning the entire manual-approval payout flow was dead end-to-end until it was surfaced.
 
 ### Trust Score Engine
 ```
@@ -268,6 +284,13 @@ Admin reviews payout queue → approves
 -15  per loan default
 Clamped to [0, 100]
 ```
+Also gates loan requests: `getLoanEligibility(score)` rejects requests below score 40, and caps requestable amount at 3×/2×/1× the group's contribution amount for scores ≥80/≥60/≥40 respectively — enforced server-side in `requestLoan()`, not just displayed.
+
+---
+
+## Known Nomba Platform Issue — Webhook Reliability
+
+On July 5, 2026, multiple teams in the hackathon's `#nomba-hackathon` Slack channel independently reported the same failure: checkout/card payments complete successfully (Nomba's own hosted page confirms success) but generate **zero webhook events** — not visible even in Nomba's own event-logs endpoint. One team (Tochukwu) traced part of this to the `accountId` header on `/checkout/order` needing to be the **sub-account**, not the parent — AjoFlow's checkout code has been corrected to match. If webhook unreliability persists after that fix, it appears to be a platform-wide Nomba issue outside this app's control, which is why the manual reconciliation fallback above exists — treat the webhook as best-effort, not guaranteed, until Nomba's team resolves it.
 
 ---
 
@@ -278,24 +301,28 @@ Clamped to [0, 100]
 **Production base URL:** `https://api.nomba.com/v1`
 
 ### Authentication
-OAuth2 `client_credentials` grant. Token cached in-memory for 55 minutes (valid 60). Every request requires the `accountId` header set to the **Parent Account ID**.
+OAuth2 `client_credentials` grant. Token cached in-memory for **25 minutes** (valid 30). Every request requires the `accountId` header — but which account ID depends on the endpoint (see below), not always the parent.
 
 ### Architecture Decision: Sub-Account Model
-Nomba hackathon sub-accounts are **dashboard-provisioned only** (not creatable via API). AjoFlow uses **one pre-provisioned sub-account** as the platform's payment-receiving layer, with **per-membership static Virtual Accounts** layered on top. Group-level fund isolation is enforced in the **Supabase ledger**, not at the Nomba account level — this is the correct architecture given the hackathon's sub-account provisioning constraint.
+Nomba hackathon sub-accounts are **dashboard-provisioned only** (not creatable via API). AjoFlow uses **one pre-provisioned sub-account** as the platform's payment-receiving layer, with **per-membership static Virtual Accounts** layered on top. Group-level fund isolation is enforced in the **Supabase ledger**, not at the Nomba account level — this is the correct architecture given the hackathon's sub-account provisioning constraint. Sandbox additionally caps virtual account creation at 2 per account holder, platform-wide (confirmed via the debug route).
 
 ### APIs Used
 
-| API | Purpose | Sandbox Status |
-|---|---|---|
-| `POST /auth/token/issue` | OAuth token | ✅ Working |
-| `POST /accounts/virtual` | Create static member VA | ✅ Working |
-| `POST /checkout/order` | Card/transfer checkout | ✅ Working |
-| `POST /checkout/order` (`tokenizeCard: true`) | Recurring card tokenization | ✅ Working (test card `5434621074252808`, PIN `0000`, OTP `000000`) |
-| `POST /checkout/tokenized-card-payment` | Charge stored token | ✅ Working |
-| `POST /transfers/bank/lookup` | Verify payout account name | ✅ Working |
-| `POST /transfers/bank` | Send payout | ✅ Working |
-| `POST /direct-debits` | Recurring mandate | ⚠️ Returns 404 in sandbox — implemented against documented contract, flagged for production enablement |
-| Webhooks | `virtual_account.funded`, `payment_success`, `transfer.success` | ✅ Working — HMAC-SHA256 verified |
+| API | Purpose | `accountId` header | Sandbox Status |
+|---|---|---|---|
+| `POST /auth/token/issue` | OAuth token | Parent | ✅ Working |
+| `POST /accounts/virtual/{subAccountId}` | Create static member VA | Parent (sub-account is in the URL path, not the header) | ✅ Working |
+| `POST /checkout/order` | Card/transfer checkout | **Sub-account** | ✅ Working — see note below |
+| `POST /checkout/order` (`tokenizeCard: true`) | Recurring card tokenization | Sub-account | ✅ Working (test card `5434621074252808`, PIN `0000`, OTP `000000`) |
+| `POST /checkout/tokenized-card-payment` | Charge stored token | Sub-account | ✅ Working — not currently scheduled/automated anywhere |
+| `POST /transfers/bank/lookup` | Verify payout account name | Parent | ✅ Working |
+| `POST /transfers/bank` | Send payout | Parent | ✅ Working — requires `senderName`, easy to miss (returns 422 without it) |
+| `POST /direct-debits` | Recurring mandate | Parent | ⚠️ Returns 404 in sandbox — implemented against documented contract, unused elsewhere in the app |
+| `GET /api/cron/check-overdue` | Daily overdue detection (AjoFlow's own route, not Nomba's) | n/a | ✅ Working, `CRON_SECRET`-protected |
+| `GET /api/debug/nomba-test` | Exercises every integration above in one call | n/a | ✅ Working — **executes a real transfer, gated behind `NOMBA_ENV` + `DEBUG_ROUTE_SECRET`, delete before final production ship** |
+| Webhooks | `virtual_account.funded`, `payment_success`, `transfer.success` | n/a | ⚠️ HMAC verification working, but see "Known Nomba Platform Issue" above — delivery itself has been unreliable platform-wide as of July 5, 2026 |
+
+**checkout `accountId` note:** this was originally implemented using the parent account, matching the pattern used for virtual accounts. A hackathon teammate (Tochukwu) independently confirmed checkout orders created under the parent header complete payment but generate zero webhook events — switching to the sub-account fixed it. See "Known Nomba Platform Issue" above for full context.
 
 ### Webhook Security
 1. Raw body read before JSON parsing (signature must match exact bytes)
@@ -309,8 +336,10 @@ Nomba hackathon sub-accounts are **dashboard-provisioned only** (not creatable v
 ## AI System
 
 **Provider:** Groq, multi-key round-robin with automatic failover (primary → secondary → tertiary on rate-limit/timeout/model-unavailable).
-**Primary model:** `llama-3.3-70b-versatile` — strong financial reasoning + Nigerian Pidgin comprehension.
-**Fallback model:** `llama-3.1-8b-instant` — used if the primary model errors mid-request.
+**Primary model:** `openai/gpt-oss-120b` — strong financial reasoning + Nigerian Pidgin comprehension.
+**Fallback model:** `openai/gpt-oss-20b` — used if the primary model errors mid-request.
+
+> **Model history:** originally built against `llama-3.3-70b-versatile` / `llama-3.1-8b-instant`. Groq deprecated both on the free/developer tier on June 17, 2026. Swapped to their recommended replacements above. Both are reasoning models that spend part of their token budget on internal reasoning before visible output — `reasoning_effort: "low"` is set on every call, without which a short `max_tokens` budget can be entirely consumed by reasoning, silently returning an empty response while still reporting success.
 
 ### Features
 - **Trust Reports** — narrative summary of group payment health
@@ -352,8 +381,14 @@ GROQ_KEY_3=
 RESEND_API_KEY=
 RESEND_FROM_EMAIL="AjoFlow <onboarding@resend.dev>"
 
+# Route protection
+CRON_SECRET=            # Vercel sends this automatically as a Bearer token to /api/cron/*
+DEBUG_ROUTE_SECRET=      # required as ?key=... to use /api/debug/nomba-test even in sandbox
+
 NEXT_PUBLIC_APP_URL=
 ```
+
+> **Note:** `RESEND_FROM_EMAIL`'s default shared domain (`resend.dev`) can only deliver to the email address on the Resend account itself — sending magic links to arbitrary user emails requires a verified custom domain in Resend. Group invites avoid this entirely by using a shareable link instead of email delivery.
 
 ---
 
@@ -380,6 +415,9 @@ cp .env.example .env.local
 # In Supabase SQL Editor, run in order:
 #   supabase/migrations/001_schema.sql
 #   supabase/migrations/002_rls.sql
+#   supabase/migrations/003_fix_group_memberships_recursion.sql
+#   supabase/migrations/004_avatars_and_loan_policy.sql
+#   supabase/migrations/005_allow_manual_payment_method.sql
 
 # 4. Enable Google OAuth in Supabase Dashboard
 # Authentication → Providers → Google → add Client ID/Secret
@@ -398,12 +436,17 @@ Use [ngrok](https://ngrok.com) or similar to expose `localhost:3000/api/webhooks
 Before relying on the Nomba integration for a demo, hit:
 
 ```
-GET /api/debug/nomba-test
+GET /api/debug/nomba-test?key=<DEBUG_ROUTE_SECRET>
 ```
 
-This runs one real token request, one real virtual account creation, and one real bank lookup against the configured Nomba environment, returning the raw response shapes. Use it to confirm field names like `data.access_token` and `data.bankAccountNumber` match what `src/lib/nomba/` expects — these were implemented against documented/team-confirmed contracts but have not been executed against a live response from this environment.
+This exercises every Nomba integration in one call — token issue, VA create/fetch, bank lookup, checkout order creation, a real ₦100 sandbox transfer, direct debit (expected 404), webhook signature self-test, and a live Groq completion — returning real response shapes and a pass/fail summary.
 
-**⚠️ Delete `src/app/api/debug/nomba-test/route.ts` before any public/production deployment** — it is intentionally unauthenticated for quick manual verification only.
+**This route executes a real bank transfer and creates real sandbox resources — it is not read-only.** It requires `DEBUG_ROUTE_SECRET` even in sandbox, and hard-blocks itself with a 403 whenever `NOMBA_ENV=production`.
+
+**Delete `src/app/api/debug/nomba-test/route.ts` before your final production deployment** if you no longer need it — a gated debug endpoint that can still move money is safer not shipped at all once it's served its purpose.
+
+### Overdue Contribution Cron
+`vercel.json` registers `/api/cron/check-overdue` to run daily. Requires `CRON_SECRET` to be set — Vercel sends it automatically as a Bearer token to registered cron routes.
 
 ---
 
@@ -433,6 +476,8 @@ This runs one real token request, one real virtual account creation, and one rea
 - **Input validation:** Zod schemas on every Server Action
 - **Audit trail:** Every financial mutation writes an immutable `audit_logs` row
 - **Secrets:** Service role key and Nomba client secret never sent to the client; all Nomba calls happen server-side
+- **Debug route:** `/api/debug/nomba-test` (executes a real bank transfer) is gated behind `DEBUG_ROUTE_SECRET` and hard-blocked entirely when `NOMBA_ENV=production` — recommended to delete outright before final deployment
+- **Service client guard:** `createServiceClient()` throws a specific, actionable error naming the missing variable if `SUPABASE_SERVICE_ROLE_KEY` is absent, instead of an opaque crash — every Server Action using it wraps the call in try/catch
 
 ---
 
@@ -448,12 +493,26 @@ This runs one real token request, one real virtual account creation, and one rea
 
 ## Roadmap
 
+**Recently completed:**
+- [x] Per-member virtual account display in the UI (backend existed, was never shown)
+- [x] Payout approval UI (backend existed, had zero caller)
+- [x] Loan trust-score eligibility enforcement (server-side, not just displayed)
+- [x] Late/missed contribution detection via daily cron
+- [x] Manual payment reconciliation fallback (for Nomba webhook reliability issues)
+- [x] Discussion reply threads
+- [x] Group deadline countdown + next-payout-recipient display
+- [x] Group settings edit page, member removal
+- [x] Auth-aware landing page (Dashboard button instead of Get Started when already logged in)
+
+**Still open:**
 - [ ] Yoruba, Hausa, Igbo AI language support
-- [ ] Group discovery + public join requests
-- [ ] Direct debit mandates (pending Nomba sandbox enablement)
+- [ ] Group discovery + public join requests (currently invite-link only)
+- [ ] Direct debit mandates (pending Nomba sandbox enablement — returns 404)
+- [ ] Scheduled/automatic tokenized-card charging (charge function exists, nothing triggers it on a due date yet)
 - [ ] PostHog analytics integration
 - [ ] Sentry error monitoring
 - [ ] Push notification delivery via service worker
+- [ ] Custom email domain for magic link (currently limited to Resend's shared sandbox domain, which only delivers to the account owner's own email)
 
 ---
 

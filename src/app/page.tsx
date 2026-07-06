@@ -1,8 +1,18 @@
 import Link from "next/link";
 import Image from "next/image";
 import { ArrowRight, Shield, Users, Zap, TrendingUp, Smartphone, Globe, CheckCircle, Star, ChevronDown, FileWarning, Banknote, LockKeyhole, MessageSquareOff, BellOff, EyeOff } from "lucide-react";
+import { createClient } from "@/lib/supabase/server";
 
-export default function LandingPage() {
+// This page reads the auth cookie to decide between "Get started"/"Log in"
+// and "Dashboard", so it must render dynamically per-request rather than
+// being statically generated at build time.
+export const dynamic = "force-dynamic";
+
+export default async function LandingPage() {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  const isLoggedIn = !!user;
+
   return (
     <div className="min-h-screen bg-background">
       {/* ── Navigation ─────────────────────────────────────── */}
@@ -21,12 +31,20 @@ export default function LandingPage() {
             <a href="#faq" className="text-sm text-text-secondary hover:text-primary transition-colors">FAQ</a>
           </div>
           <div className="flex items-center gap-3">
-            <Link href="/login" className="text-sm font-medium text-text-secondary hover:text-primary transition-colors hidden sm:block">
-              Log in
-            </Link>
-            <Link href="/signup" className="bg-primary text-white text-sm font-semibold px-4 py-2 rounded-xl hover:bg-primary/90 transition-colors">
-              Get started
-            </Link>
+            {isLoggedIn ? (
+              <Link href="/dashboard" className="bg-primary text-white text-sm font-semibold px-4 py-2 rounded-xl hover:bg-primary/90 transition-colors">
+                Go to Dashboard
+              </Link>
+            ) : (
+              <>
+                <Link href="/login" className="text-sm font-medium text-text-secondary hover:text-primary transition-colors hidden sm:block">
+                  Log in
+                </Link>
+                <Link href="/signup" className="bg-primary text-white text-sm font-semibold px-4 py-2 rounded-xl hover:bg-primary/90 transition-colors">
+                  Get started
+                </Link>
+              </>
+            )}
           </div>
         </div>
       </nav>
@@ -64,19 +82,31 @@ export default function LandingPage() {
                 ))}
               </ul>
               <div className="flex flex-col sm:flex-row gap-3">
-                <Link
-                  href="/signup"
-                  className="inline-flex items-center justify-center gap-2 bg-primary text-white font-semibold px-6 py-3.5 rounded-xl hover:bg-primary/90 transition-all duration-200 shadow-lg shadow-primary/20"
-                >
-                  Get started free
-                  <ArrowRight className="w-4 h-4" />
-                </Link>
-                <Link
-                  href="/login"
-                  className="inline-flex items-center justify-center gap-2 bg-white border border-border text-text font-semibold px-6 py-3.5 rounded-xl hover:bg-gray-50 transition-colors"
-                >
-                  Log in
-                </Link>
+                {isLoggedIn ? (
+                  <Link
+                    href="/dashboard"
+                    className="inline-flex items-center justify-center gap-2 bg-primary text-white font-semibold px-6 py-3.5 rounded-xl hover:bg-primary/90 transition-all duration-200 shadow-lg shadow-primary/20"
+                  >
+                    Go to Dashboard
+                    <ArrowRight className="w-4 h-4" />
+                  </Link>
+                ) : (
+                  <>
+                    <Link
+                      href="/signup"
+                      className="inline-flex items-center justify-center gap-2 bg-primary text-white font-semibold px-6 py-3.5 rounded-xl hover:bg-primary/90 transition-all duration-200 shadow-lg shadow-primary/20"
+                    >
+                      Get started free
+                      <ArrowRight className="w-4 h-4" />
+                    </Link>
+                    <Link
+                      href="/login"
+                      className="inline-flex items-center justify-center gap-2 bg-white border border-border text-text font-semibold px-6 py-3.5 rounded-xl hover:bg-gray-50 transition-colors"
+                    >
+                      Log in
+                    </Link>
+                  </>
+                )}
               </div>
               <p className="text-xs text-text-secondary mt-4">
                 No credit card required. Set up your first group in 2 minutes.
@@ -351,12 +381,20 @@ export default function LandingPage() {
             Set up your first group in under 2 minutes.
           </p>
           <div className="flex flex-col sm:flex-row gap-4 justify-center">
-            <Link href="/signup" className="inline-flex items-center justify-center gap-2 bg-white text-primary font-semibold px-8 py-4 rounded-xl hover:bg-gray-50 transition-colors shadow-lg">
-              Start for free <ArrowRight className="w-4 h-4" />
-            </Link>
-            <Link href="/login" className="inline-flex items-center justify-center gap-2 border border-white/30 text-white font-semibold px-8 py-4 rounded-xl hover:bg-white/10 transition-colors">
-              Log in to your account
-            </Link>
+            {isLoggedIn ? (
+              <Link href="/dashboard" className="inline-flex items-center justify-center gap-2 bg-white text-primary font-semibold px-8 py-4 rounded-xl hover:bg-gray-50 transition-colors shadow-lg">
+                Go to Dashboard <ArrowRight className="w-4 h-4" />
+              </Link>
+            ) : (
+              <>
+                <Link href="/signup" className="inline-flex items-center justify-center gap-2 bg-white text-primary font-semibold px-8 py-4 rounded-xl hover:bg-gray-50 transition-colors shadow-lg">
+                  Start for free <ArrowRight className="w-4 h-4" />
+                </Link>
+                <Link href="/login" className="inline-flex items-center justify-center gap-2 border border-white/30 text-white font-semibold px-8 py-4 rounded-xl hover:bg-white/10 transition-colors">
+                  Log in to your account
+                </Link>
+              </>
+            )}
           </div>
         </div>
       </section>

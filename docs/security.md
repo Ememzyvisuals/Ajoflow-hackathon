@@ -6,7 +6,7 @@ Supabase Auth handles credential storage, session issuance, and OAuth flows. Ajo
 
 Three supported methods:
 - Email + Password
-- Magic Link (passwordless OTP via email)
+- Magic Link — implemented via `POST /api/auth/magic-link` using Resend + `supabase.auth.admin.generateLink()`, deliberately bypassing Supabase's built-in email sending (which is rate-limited to a few emails per hour and unsuitable for a live demo). **Known limitation:** while using Resend's shared `onboarding@resend.dev` sending domain, Resend will only actually deliver to the email address on the Resend account itself — sending to arbitrary user emails requires a verified custom domain. Group invites work around this entirely by using a shareable invite link instead of relying on email delivery.
 - Google OAuth
 
 Sessions are stored in httpOnly cookies, refreshed automatically by `middleware.ts` on every request via `supabase.auth.getUser()`.
@@ -30,7 +30,19 @@ Two layers, defense in depth:
 | `payout_accounts` | Fully owner-scoped (`user_id = auth.uid()`) |
 | `webhook_events`, `audit_logs` | Service-role only — never queried client-side |
 
-## Webhook Verification
+## Debug Route Lockdown
+
+`/api/debug/nomba-test` exercises every Nomba integration in one call, including a real bank transfer and real resource creation — it is not read-only, and was originally shipped with **zero authentication**, meaning any unauthenticated visitor who found the URL could trigger a real money transfer and see partial credential/account-ID data in the response. Fixed:
+- Hard-blocks with `403` when `NOMBA_ENV=production`, regardless of any other check
+- Requires `?key=<DEBUG_ROUTE_SECRET>` matching a server-side env var even in sandbox
+
+**Recommended before final production deployment: delete this route file entirely.** A gated debug endpoint that can still move money is safer than an ungated one, but safer still is not shipping it at all once it's served its purpose.
+
+## Service Client Crash Guard
+
+`createServiceClient()` (`src/lib/supabase/server.ts`) previously threw an unguarded, opaque error whenever `SUPABASE_SERVICE_ROLE_KEY` or `NEXT_PUBLIC_SUPABASE_URL` was missing — this surfaced to users as a generic "something went wrong" with no indication of the real cause, and was the root cause of a real reported bug (bank account verification failing silently). Fixed at the source: the function now throws a specific, actionable message naming the missing variable. Every Server Action that calls it (`addPayoutAccount`, `approvePayout`, `removeMember`, `updateGroup`, `manuallyRecordContribution`) wraps the call in try/catch and returns that message as a normal `{ success: false, error }` result instead of letting it crash uncaught.
+
+
 
 The single most security-critical code path in AjoFlow (`src/app/api/webhooks/nomba/route.ts`):
 
@@ -100,6 +112,8 @@ Every financial state mutation writes an immutable `audit_logs` row: `GROUP_CREA
 | `NOMBA_WEBHOOK_SECRET` | Server-only — used exclusively for HMAC verification |
 | `GROQ_KEY_*` | Server-only |
 | `RESEND_API_KEY` | Server-only |
+| `DEBUG_ROUTE_SECRET` | Server-only — gates `/api/debug/nomba-test`, which can execute real financial transactions |
+| `CRON_SECRET` | Server-only — Vercel sends this automatically as a Bearer token to `/api/cron/check-overdue`; the route rejects any request without a matching value |
 | `NEXT_PUBLIC_*` | Intentionally exposed (Supabase URL + anon key, which is safe by design — RLS is the actual security boundary, not key secrecy) |
 
 No secret is ever interpolated into client-rendered HTML or passed as a prop to a Client Component.

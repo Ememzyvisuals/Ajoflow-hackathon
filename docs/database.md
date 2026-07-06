@@ -97,6 +97,21 @@ All tables live in the `public` schema, Supabase-managed PostgreSQL. RLS is enab
 
 ---
 
+## payment_cycles
+
+**Purpose:** One row per rotation/collection period for a group (e.g. "July 2026 Round"). Deadlines and "who's collecting this round" are both anchored to the group's currently `active` cycle.
+
+| Column | Type | Notes |
+|---|---|---|
+| group_id | UUID FK | |
+| name | TEXT | |
+| start_date, end_date | DATE | `end_date` is the deadline shown as a countdown in the group page and dashboard |
+| status | TEXT | `active` \| `completed` \| `cancelled` |
+
+**Read by:** the group page's deadline card, the dashboard's "Payment due in N days" reminders, and `/api/cron/check-overdue`, which closes a cycle out (`completed`) once it's 7+ days past `end_date`.
+
+---
+
 ## contributions
 
 **Purpose:** Every individual payment event.
@@ -104,13 +119,17 @@ All tables live in the `public` schema, Supabase-managed PostgreSQL. RLS is enab
 | Column | Type | Notes |
 |---|---|---|
 | membership_id, group_id | UUID FK | |
+| cycle_id | UUID FK → payment_cycles | nullable — which round this contribution belongs to |
 | amount | DECIMAL(12,2) | |
 | status | TEXT | `pending` \| `paid` \| `late` \| `failed` |
-| transaction_reference | TEXT | Nomba transactionReference — **unique check prevents double-counting** |
-| payment_method | TEXT | `card` \| `transfer` |
+| due_date | DATE | nullable — copied from the active cycle's `end_date` at the time the contribution is created |
+| transaction_reference | TEXT | Nomba transactionReference — **unique check prevents double-counting**; manually-recorded contributions get a synthetic `manual-<timestamp>` reference |
+| payment_method | TEXT | `card` \| `transfer` \| `manual` (migration `005` — `manual` added for the admin reconciliation fallback; original constraint only allowed `card`/`transfer`) — `manual` means an admin recorded it directly (see "Webhook Reliability" in `docs/nomba-integration.md`), not a Nomba webhook |
 | nomba_transaction_id | TEXT | |
 
 **Indexes:** `group_id`, `membership_id`, `status`.
+
+**Note:** `due_date` and `cycle_id` existed in the schema from the start but were never populated — the webhook handler's original insert omitted both. Fixed: it now looks up the group's active cycle and populates both at insert time, which is also what makes real on-time/late detection possible (see `docs/nomba-integration.md`, "Webhooks" section).
 
 ---
 
@@ -154,6 +173,10 @@ All tables live in the `public` schema, Supabase-managed PostgreSQL. RLS is enab
 | status | TEXT | `pending` \| `approved` \| `rejected` \| `disbursed` \| `repaid` \| `defaulted` |
 | decided_by, decided_at | UUID, TIMESTAMPTZ | admin who decided |
 
+**Eligibility enforcement:** `requestLoan()` (`src/features/loans/actions.ts`) calls `getLoanEligibility(score)` from the trust engine before allowing the insert — trust score < 40 is rejected outright; otherwise the requested amount is capped at a multiplier of the group's `contribution_amount` (score ≥ 80 → 3×, ≥ 60 → 2×, ≥ 40 → 1×). This function existed in the codebase for a while with no caller before being wired in.
+
+**Decision side effects:** `decideLoan()` sends the requester an in-app notification and writes an `audit_logs` row (`LOAN_APPROVED`/`LOAN_REJECTED`) — this used to live in a dead duplicate of the function elsewhere in the codebase that no UI ever called; consolidated into the one path that's actually wired to the UI.
+
 ---
 
 ## trust_scores
@@ -167,7 +190,7 @@ All tables live in the `public` schema, Supabase-managed PostgreSQL. RLS is enab
 | on_time_count, late_count, missed_count | INT | |
 | streak | INT | resets to 0 on late/missed |
 
-**Mutated exclusively by `src/features/trust/engine.ts`** — never updated directly from UI.
+**Mutated exclusively by `src/features/trust/engine.ts`** — never updated directly from UI. Called from three places: the webhook handler (on-time/late, based on whether payment beat the cycle deadline), `manuallyRecordContribution()` (same on-time/late check, for admin-recorded payments), and `/api/cron/check-overdue` (late/missed, for contributions nobody ever paid at all — this cron job is what makes `recordLatePayment()`/`recordMissedPayment()` reachable; they had no caller for a while after being written).
 
 ---
 

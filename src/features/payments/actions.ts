@@ -20,7 +20,12 @@ export async function initiateContributionPayment(
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return { success: false, error: "Not authenticated." };
 
-  const serviceClient = createServiceClient();
+  let serviceClient: ReturnType<typeof createServiceClient>;
+  try {
+    serviceClient = createServiceClient();
+  } catch (err) {
+    return { success: false, error: err instanceof Error ? err.message : "Server configuration error." };
+  }
 
   // Get group contribution amount
   const { data: group } = await serviceClient
@@ -114,7 +119,12 @@ export async function addPayoutAccount(
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return { success: false, error: "Not authenticated." };
 
-  const serviceClient = createServiceClient();
+  let serviceClient: ReturnType<typeof createServiceClient>;
+  try {
+    serviceClient = createServiceClient();
+  } catch (err) {
+    return { success: false, error: err instanceof Error ? err.message : "Server configuration error." };
+  }
 
   // Verify account via Nomba bank lookup — timeboxed so a slow/hung Nomba
   // sandbox can never leave the "Verify & Save" button spinning forever.
@@ -163,9 +173,12 @@ export async function approvePayout(payoutId: string): Promise<ActionResult> {
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return { success: false, error: "Not authenticated." };
 
-  const serviceClient = createServiceClient();
-
-  // Get payout details
+  let serviceClient: ReturnType<typeof createServiceClient>;
+  try {
+    serviceClient = createServiceClient();
+  } catch (err) {
+    return { success: false, error: err instanceof Error ? err.message : "Server configuration error." };
+  }
   const { data: payout } = await serviceClient
     .from("payouts")
     .select("*, payout_accounts(*), groups(*)")
@@ -259,102 +272,3 @@ export async function approvePayout(payoutId: string): Promise<ActionResult> {
   }
 }
 
-// ── Request Loan ───────────────────────────────────────────────
-export async function requestLoan(input: {
-  groupId: string;
-  amount: number;
-  reason: string;
-}): Promise<ActionResult> {
-  const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) return { success: false, error: "Not authenticated." };
-
-  const serviceClient = createServiceClient();
-
-  if (input.amount <= 0) return { success: false, error: "Amount must be positive." };
-
-  const { data: membership } = await serviceClient
-    .from("group_memberships")
-    .select("id")
-    .eq("group_id", input.groupId)
-    .eq("user_id", user.id)
-    .eq("status", "active")
-    .single();
-
-  if (!membership) return { success: false, error: "You are not an active member of this group." };
-
-  const { error } = await serviceClient.from("loan_requests").insert({
-    group_id: input.groupId,
-    member_id: user.id,
-    amount: input.amount,
-    reason: input.reason,
-    status: "pending",
-  });
-
-  if (error) return { success: false, error: error.message };
-
-  revalidatePath("/loans");
-  return { success: true };
-}
-
-// ── Approve / Reject Loan ──────────────────────────────────────
-export async function decideLoan(
-  loanId: string,
-  decision: "approved" | "rejected"
-): Promise<ActionResult> {
-  const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) return { success: false, error: "Not authenticated." };
-
-  const serviceClient = createServiceClient();
-
-  const { data: loan } = await serviceClient
-    .from("loan_requests")
-    .select("*")
-    .eq("id", loanId)
-    .single();
-
-  if (!loan) return { success: false, error: "Loan not found." };
-
-  const { data: membership } = await serviceClient
-    .from("group_memberships")
-    .select("role")
-    .eq("group_id", loan.group_id)
-    .eq("user_id", user.id)
-    .single();
-
-  if (!membership || !["owner", "admin"].includes(membership.role)) {
-    return { success: false, error: "Only admins can decide loan requests." };
-  }
-
-  await serviceClient
-    .from("loan_requests")
-    .update({
-      status: decision,
-      decided_by: user.id,
-      decided_at: new Date().toISOString(),
-    })
-    .eq("id", loanId);
-
-  await serviceClient.from("notifications").insert({
-    user_id: loan.member_id,
-    type: decision === "approved" ? "loan_approved" : "loan_rejected",
-    title: decision === "approved" ? "Loan Approved ✅" : "Loan Rejected",
-    message:
-      decision === "approved"
-        ? `Your loan request of ₦${loan.amount.toLocaleString()} has been approved.`
-        : `Your loan request of ₦${loan.amount.toLocaleString()} was not approved.`,
-    data: { loan_id: loanId, amount: loan.amount },
-  });
-
-  await serviceClient.from("audit_logs").insert({
-    user_id: user.id,
-    action: `LOAN_${decision.toUpperCase()}`,
-    entity_type: "loan_request",
-    entity_id: loanId,
-    metadata: { amount: loan.amount, group_id: loan.group_id },
-  });
-
-  revalidatePath("/loans");
-  return { success: true };
-}

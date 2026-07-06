@@ -4,9 +4,17 @@
 // "Nomba treats amount in NAIRA not kobo"
 // Multiple people confirmed — send amount in NAIRA directly
 // NO multiplication by 100
+//
+// CONFIRMED from hackathon channel (July 5 2026, Tochukwu):
+// /checkout/order must use the SUB-ACCOUNT as the accountId header,
+// not the parent. Orders created under the parent's accountId silently
+// never fire a webhook event at all — payment succeeds, Nomba's own
+// event-logs show zero events, nothing arrives at our webhook URL.
+// This does not affect /accounts/virtual, which correctly uses the
+// parent header (see virtual-accounts.ts).
 // ============================================================
 
-import { nombaRequest, PARENT_ACCOUNT_ID } from "./client";
+import { nombaRequest, SUB_ACCOUNT_ID } from "./client";
 
 export interface CreateCheckoutOrderParams {
   orderReference: string;
@@ -51,7 +59,7 @@ export async function createCheckoutOrder(
 
   const response = await nombaRequest<{ code: string; data: NombaCheckoutOrder }>(
     "/checkout/order",
-    { method: "POST", accountId: PARENT_ACCOUNT_ID, body }
+    { method: "POST", accountId: SUB_ACCOUNT_ID, body }
   );
 
   return response.data;

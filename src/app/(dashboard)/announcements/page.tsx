@@ -15,7 +15,7 @@ export default async function AnnouncementsPage() {
 
   const { data: posts } = await supabase
     .from("group_posts")
-    .select("*, profiles(full_name), groups(name)")
+    .select("*, profiles(full_name), groups(name), post_comments(id, content, created_at, profiles(full_name))")
     .in("group_id", groupIds.length > 0 ? groupIds : ["none"])
     .order("created_at", { ascending: false })
     .limit(30);

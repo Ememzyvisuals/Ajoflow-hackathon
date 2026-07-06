@@ -9,7 +9,7 @@
 
 **Confirmed via Nomba hackathon team (not assumed):** the documented sandbox host `sandbox.api.nomba.com` was incorrect in early training materials — the correct, team-confirmed host is `sandbox.nomba.com`. AjoFlow's client (`src/lib/nomba/client.ts`) uses the confirmed URL.
 
-The hackathon team also confirmed teams **may use production credentials** for the hackathon itself, since several sandbox features (direct debit, card tokenization edge cases) are limited. `NOMBA_ENV` makes this a single environment-variable switch — no code changes required.
+No code changes are required to move from sandbox to production — every Nomba function reads its base URL from `NOMBA_ENV`. See the migration checklist at the bottom of this doc for what *does* need to change (credentials, webhook registration).
 
 ---
 
@@ -23,11 +23,9 @@ Headers: { "Content-Type": "application/json", "accountId": "<PARENT_ACCOUNT_ID>
 Body: { "grant_type": "client_credentials", "client_id": "...", "client_secret": "..." }
 ```
 
-Token valid 60 minutes. AjoFlow caches in-memory for 55 minutes (`src/lib/nomba/client.ts:getNombaToken()`), refreshing proactively before expiry rather than reactively on 401.
+**Token is valid 30 minutes.** AjoFlow caches in-memory for **25 minutes** (`src/lib/nomba/client.ts:getNombaToken()`), refreshing proactively before expiry rather than reactively on 401. (An earlier version of this doc said 55/60 minutes — that was wrong and has been corrected to match the actual code and the hackathon channel's confirmed token lifetime.)
 
-**Every subsequent request** must include:
-- `Authorization: Bearer <token>`
-- `accountId: <PARENT_ACCOUNT_ID>` (the **parent**, not sub-account — confirmed by Nomba team)
+**Every subsequent request** must include `Authorization: Bearer <token>`. The `accountId` header value is **endpoint-specific** — see the per-endpoint sections below. It is not always the parent account.
 
 ---
 
@@ -41,11 +39,15 @@ Parent Account (hackathon-issued)
 
 **Why this model:** the Nomba hackathon documentation states sub-accounts are dashboard-provisioned only. AjoFlow was issued exactly one sub-account. Rather than incorrectly assuming dynamic per-group sub-account creation is possible, AjoFlow uses the single sub-account as its payment-receiving layer and enforces **group-level fund isolation entirely within the Supabase ledger** (`group_wallets` table) — Nomba moves money, Supabase tracks whose money it is.
 
+**Known sandbox limitation:** sandbox caps virtual account creation at **2 accounts total per account holder**, platform-wide (confirmed via `/api/debug/nomba-test` — the 3rd creation attempt returns `HTTP 400: Only 2 sandbox virtual accounts are allowed per account holder`). This does not appear to be a per-group limit — it's global to the sub-account. Not expected to apply in production, but budget for it when demoing with more than 2 members in sandbox.
+
 ---
 
 ## Virtual Accounts
 
-**Endpoint:** `POST /accounts/virtual`
+**Endpoint:** `POST /accounts/virtual/{SUB_ACCOUNT_ID}` — the sub-account ID is part of the **URL path**, not the request body. (An earlier version of this doc showed `POST /accounts/virtual` with no path parameter — that was wrong; confirmed correct via a working, tested call through the debug route.)
+
+**Header:** `accountId: <PARENT_ACCOUNT_ID>` — the parent, not the sub-account, for this specific endpoint.
 
 ```json
 {
@@ -59,18 +61,25 @@ Parent Account (hackathon-issued)
 
 `accountRef` is built deterministically in `buildAccountRef(membershipId)` — stripped of hyphens, prefixed `af`, truncated to Nomba's accepted length. This value is stored in `member_virtual_accounts.account_reference` and is the **join key** the webhook handler uses to resolve incoming funds back to a specific member + group.
 
+**Every member gets one, automatically:** the group owner gets theirs at `createGroup()`, and every other member gets theirs at `acceptGroupInvite()`. This is fetch-or-create — if creation fails non-fatally (e.g. the sandbox 2-account cap above), group/membership creation still succeeds; the member just won't have a virtual account yet. `/api/payments/virtual-account` (`POST`) is a retry endpoint a member can call to generate one after the fact — surfaced in the UI as the "Generate My Account" button on the group page's Overview tab.
+
+**Frontend visibility:** each member's own virtual account is displayed on their group page (Overview tab, `MyVirtualAccountCard`) with a copy-to-clipboard account number. This was built after an audit found the backend fully created these accounts but no page ever displayed them.
+
 ---
 
 ## Checkout (Card / Transfer)
 
 **Endpoint:** `POST /checkout/order`
-**Amounts are in Kobo** (₦1 = 100 kobo) — `nairaToKobo()` / `koboToNaira()` helpers in `src/lib/nomba/checkout.ts` handle conversion at every boundary.
+
+**Header:** `accountId: <SUB_ACCOUNT_ID>` — **not the parent.** (Corrected — see "Confirmed community fix" below. An earlier version of this code and doc used the parent account ID here, matching the pattern used for virtual accounts. That was wrong for this specific endpoint.)
+
+**Amounts are in NAIRA, not Kobo.** Confirmed independently by multiple teams in the hackathon channel on July 3, 2026: "Nomba treats amount in naira not kobo." Send the amount as-is, with **no multiplication by 100**. (An earlier version of this doc said amounts are in Kobo and described `nairaToKobo()`/`koboToNaira()` conversion helpers — that was wrong and has caused real bugs before being caught; `src/lib/nomba/checkout.ts` sends `amountNGN` directly with no conversion.)
 
 ```json
 {
   "order": {
     "orderReference": "AF-XXXXX",
-    "amount": "1000000",
+    "amount": 10000,
     "currency": "NGN",
     "customerEmail": "user@email.com",
     "customerId": "<user_id>",
@@ -80,7 +89,10 @@ Parent Account (hackathon-issued)
 }
 ```
 
-Sandbox checkout confirmed at `sandbox.nomba.com/v1/checkout/order` (team-confirmed in hackathon channel — the documented `/sandbox/checkout/order` path did not work for several teams).
+### Confirmed community fix — checkout `accountId` header (July 5, 2026)
+Another hackathon team (Tochukwu, in the `#nomba-hackathon` Slack channel) independently diagnosed and confirmed: orders created with the **parent** account as the `accountId` header on `/checkout/order` complete payment successfully (Nomba shows its own success confirmation) but **generate zero webhook events** — not even a failed delivery attempt shows in Nomba's own `/v1/webhooks/event-logs`. Switching that one header to the **sub-account** ID fixed it for their team. AjoFlow's `checkout.ts` has been updated to match. This does not affect `/accounts/virtual`, which is confirmed correct using the parent header.
+
+If webhook delivery for checkout/card payments is still unreliable after this fix, treat it as a possible platform-wide Nomba issue rather than an AjoFlow bug — see "Webhook Reliability" below for the fallback AjoFlow has in place.
 
 ### Test Cards
 | Scenario | Card | Notes |
@@ -101,13 +113,13 @@ Per the hackathon channel's confirmed flow:
 4. AjoFlow stores `tokenKey`
 5. Subsequent contributions call `POST /checkout/tokenized-card-payment` with the stored `tokenKey` — no re-entry of card details
 
-Implemented in `src/lib/nomba/tokenized-cards.ts`. This directly serves the "intelligent recurring billing" requirement without needing Direct Debit (which has sandbox limitations — see below).
+Implemented in `src/lib/nomba/tokenized-cards.ts`. **Known gap:** nothing currently *schedules* a recurring tokenized charge automatically — the charge function exists and works when called, but there is no cron/trigger that calls it on a due date yet. Today's contribution flow is member-initiated (visit the app, pay), not auto-debited. This is separate from the `/api/cron/check-overdue` job (below), which only detects and scores missed/late payments — it does not attempt to auto-charge a stored card.
 
 ---
 
 ## Direct Debit
 
-**Sandbox status:** all `/direct-debits/*` endpoints return `404` regardless of payload — confirmed by multiple teams independently in the hackathon channel, not an AjoFlow integration bug.
+**Sandbox status:** all `/direct-debits/*` endpoints return `404` regardless of payload — confirmed by multiple teams independently in the hackathon channel, and reconfirmed directly via `/api/debug/nomba-test`, not an AjoFlow integration bug.
 
 AjoFlow implements the client against the **documented production contract**:
 
@@ -119,7 +131,7 @@ POST /direct-debits/debit-mandate → charge with mandateId
 
 `bankCode` uses CBN codes (GTBank `058`, Access `044`, UBA `033`, etc. — `BANK_CODES` map in `src/lib/nomba/direct-debit.ts`).
 
-**This feature is flagged for production-only validation** — the code path exists and is unit-testable in isolation, but live end-to-end mandate flow could not be verified in sandbox per Nomba's own confirmation. Tokenized cards serve as the working recurring-payment mechanism for the sandbox demo.
+**Not currently used anywhere in the app** — tokenized cards serve as the working recurring-payment mechanism instead. This code path is unit-testable in isolation but unverified end-to-end since sandbox can't validate it. Flag for production-only validation if you decide to pursue it further.
 
 ---
 
@@ -130,7 +142,11 @@ POST /transfers/bank/lookup   → verify account name before sending money
 POST /transfers/bank          → execute transfer
 ```
 
+**Required field, easy to miss:** `senderName` is required by Nomba on `/transfers/bank` — omitting it returns `HTTP 422: ["senderName must not be blank"]`. This was a real bug found via the debug route: the transfer code never sent this field at all. Now sends the **group's name** as the sender (e.g. "Market Women Cooperative" shows on the recipient's bank statement), or `"AjoFlow Debug Test"` for the debug route's own sandbox check.
+
 Every transfer carries a `merchantTxRef` built from the `payouts.id` (`buildMerchantTxRef()`) — this is AjoFlow's idempotency key, matched against the `transfer.success` webhook to confirm completion without risk of double-payout on retry.
+
+`amount` is sent in **NAIRA**, same rule as checkout above.
 
 ---
 
@@ -153,12 +169,51 @@ Every transfer carries a `merchantTxRef` built from the `payouts.id` (`buildMerc
 ### Handled Events
 | Event | Handler | Effect |
 |---|---|---|
-| `virtual_account.funded` | `handleVirtualAccountFunded()` | Creates `contributions` row, updates `group_wallets`, recalculates trust score |
-| `payment_success` | `handlePaymentSuccess()` | Resolves `payment_sessions` by `orderReference`, same reconciliation pipeline |
+| `virtual_account.funded` | `handleVirtualAccountFunded()` | Creates `contributions` row (with real `due_date`/`cycle_id` from the group's active cycle), updates `group_wallets`, records on-time **or late** trust score depending on whether payment beat the cycle deadline |
+| `payment_success` | `handlePaymentSuccess()` | Resolves `payment_sessions` by `orderReference`, same reconciliation pipeline, same on-time/late trust logic |
 | `transfer.success` | `handleTransferSuccess()` | Resolves `payouts` by `merchantTxRef`, marks paid |
 
+**Trust-score fix (July 5, 2026):** both handlers previously called `recordOnTimePayment()` unconditionally, regardless of whether the payment actually arrived before or after the group's cycle deadline. A payment received a week late was being scored as "on time." Both handlers now check the active `payment_cycles.end_date` and call `recordLatePayment()` instead when the payment is genuinely late.
+
 ### Webhook URL Refresh
-Per hackathon team confirmation, **submitted webhook URLs expire every 2 hours** and the submission form can be filled multiple times. For local development this means re-submitting the ngrok URL periodically; for the deployed Vercel URL this is a non-issue since the URL is static — but the **initial production webhook URL must still be (re-)submitted via the hackathon form** after final deployment.
+Per hackathon team confirmation, **submitted webhook URLs expire every 2 hours** and the submission form can be filled multiple times. For local development this means re-submitting the ngrok URL periodically; for the deployed Vercel URL this is a non-issue since the URL is static — but the **initial production webhook URL must still be (re-)submitted via the hackathon form** after final deployment, using **production credentials and a production webhook secret**, which typically differ from sandbox's.
+
+---
+
+## Webhook Reliability — Known Platform-Wide Issue
+
+On July 5, 2026, multiple hackathon teams independently reported the same failure in the `#nomba-hackathon` Slack channel: card/checkout payments complete successfully (Nomba's own hosted page confirms success) but **no webhook event is generated at all** — not visible in Nomba's own `/v1/webhooks/event-logs`, and nothing arrives at the registered webhook URL. This appears to be either a Nomba-side issue or the `accountId` header scoping bug described above (now fixed in AjoFlow's checkout code).
+
+Because this is a platform-wide issue outside AjoFlow's control, **do not assume the webhook alone is a reliable source of truth for whether a payment landed.** AjoFlow has a manual fallback:
+
+- **Member side:** "Sent money but it's not showing?" button on the virtual account card (`reportPaymentIssue`, `src/features/payments/reconciliation.ts`) — notifies the group's admins directly.
+- **Admin side:** "Record Payment" button per member in the group's Members tab (`manuallyRecordContribution`) — lets an admin who has personally verified the transfer in their own bank app record the contribution manually. This correctly updates the wallet balance, trust score (on-time/late, same deadline check as the webhook path), and writes an audit log entry (`CONTRIBUTION_MANUALLY_RECORDED`) so it's distinguishable from a webhook-confirmed payment.
+
+This does not replace the webhook — it's a safety net for when the webhook doesn't fire, so a member paying correctly isn't penalized by a trust-score drop through no fault of their own.
+
+---
+
+## Overdue Contribution Detection (Cron)
+
+**Endpoint:** `GET /api/cron/check-overdue`, registered in `vercel.json` to run daily. Protected by `CRON_SECRET` (Vercel automatically sends this as a Bearer token when the env var is set).
+
+For every active payment cycle whose `end_date` has passed, checks every active member for a `paid` contribution in that cycle:
+- Cycle ended 1–6 days ago and member hasn't paid → contribution marked `late`, `recordLatePayment()` called
+- Cycle ended 7+ days ago and member hasn't paid → contribution marked `failed`, `recordMissedPayment()` called, cycle marked `completed`
+
+This is what actually calls `recordLatePayment()`/`recordMissedPayment()` in the trust engine — both existed in the codebase with zero caller before this route was built, meaning trust scores could only ever go up, never reflect a genuinely missed payment.
+
+---
+
+## Debug/Test Endpoint
+
+**Endpoint:** `GET /api/debug/nomba-test` — exercises every Nomba (and Groq) integration in one call: token issue, VA creation/fetch, bank lookup, checkout order creation, a real ₦100 sandbox bank transfer, direct debit (expected 404), webhook signature self-test, and a live Groq completion.
+
+**This route executes a real bank transfer and creates real sandbox resources on every call — it is not read-only.** It:
+- Hard-blocks itself entirely when `NOMBA_ENV=production` (returns 403)
+- Requires `?key=<DEBUG_ROUTE_SECRET>` matching an env var even in sandbox
+
+**Delete this route file before your final production deployment** if you no longer need it — a debug endpoint that can move money, even a gated one, is safer not to ship at all once it's served its purpose.
 
 ---
 
@@ -166,18 +221,24 @@ Per hackathon team confirmation, **submitted webhook URLs expire every 2 hours**
 
 | Failure | Cause | Recovery |
 |---|---|---|
-| 401 on every call | Token expired mid-request or wrong `accountId` | Token cache auto-refreshes; verify `NOMBA_PARENT_ACCOUNT_ID` is used, not sub-account |
+| 401 on every call | Token expired mid-request or wrong `accountId` | Token cache auto-refreshes every 25 min; verify the correct account ID is used per endpoint (see per-section headers above — it's not always the parent) |
 | Webhook signature mismatch | `JSON.stringify()` reordering vs raw body | AjoFlow reads raw text body before any parsing — never reconstructs JSON for verification |
 | Duplicate contribution on webhook retry | Nomba resending the same event | `request_id` UNIQUE constraint + `processed` flag check |
-| "International card processing disabled" | Using a non-sandbox-enabled test card variant | Use the confirmed sandbox card numbers listed above |
-| Direct debit 404 | Sandbox limitation (confirmed by Nomba team) | Use tokenized cards for sandbox demo; flag mandate flow for production review |
+| `HTTP 422: senderName must not be blank` on transfer | Missing required field | Fixed — `transferToBank` now always sends `senderName` |
+| Zero webhook events after successful checkout | `accountId` header scoping on `/checkout/order`, or a platform-wide Nomba issue | Fixed the header (sub-account, not parent); use the manual reconciliation fallback if it persists |
+| "Only 2 sandbox virtual accounts are allowed per account holder" | Sandbox-wide cap, not a bug | Expected in sandbox testing; not expected in production |
+| Direct debit 404 | Sandbox limitation (confirmed by Nomba team) | Use tokenized cards instead; not currently wired into any auto-charge schedule |
+| `createServiceClient()` throws / "something went wrong" on payout account verification | `SUPABASE_SERVICE_ROLE_KEY` missing/invalid on the deployment | Function now throws a clear, specific message naming the missing env var instead of an opaque crash |
 
 ---
 
 ## Sandbox → Production Migration Checklist
 
-1. Flip `NOMBA_ENV=production`
+1. Flip `NOMBA_ENV=production` in Vercel
 2. Swap `NOMBA_CLIENT_ID` / `NOMBA_CLIENT_SECRET` to live credentials
-3. Re-submit production webhook URL via Nomba dashboard/form
-4. Verify direct debit mandate flow end-to-end (sandbox could not validate this)
-5. Confirm production `NOMBA_PARENT_ACCOUNT_ID` / `NOMBA_SUB_ACCOUNT_ID` match the live account issued
+3. Swap `NOMBA_PARENT_ACCOUNT_ID` / `NOMBA_SUB_ACCOUNT_ID` to the live account IDs issued for production — sandbox IDs will not work against `api.nomba.com`
+4. Re-register your webhook URL with Nomba for production, and update `NOMBA_WEBHOOK_SECRET` — production likely issues a different signing secret than sandbox
+5. Confirm `NEXT_PUBLIC_APP_URL` is the real production domain, exact casing (a capital letter in this value caused a real OAuth redirect bug earlier in development — Supabase/Nomba redirect matching is case-sensitive)
+6. Delete or keep `/api/debug/nomba-test` gated — it is blocked in production by an env check, but deleting it entirely removes any risk
+7. Verify direct debit mandate flow end-to-end if you intend to use it — sandbox could not validate this at all
+8. Smoke-test group creation once for real after switching — production Nomba may enforce real KYC/BVN requirements on virtual account creation that sandbox does not; this could not be verified without production credentials

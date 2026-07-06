@@ -34,7 +34,12 @@ export async function createGroup(input: CreateGroupInput): Promise<ActionResult
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return { success: false, error: "Not authenticated." };
 
-  const serviceClient = createServiceClient();
+  let serviceClient: ReturnType<typeof createServiceClient>;
+  try {
+    serviceClient = createServiceClient();
+  } catch (err) {
+    return { success: false, error: err instanceof Error ? err.message : "Server configuration error." };
+  }
 
   // 1. Create group
   const { data: group, error: groupError } = await serviceClient
@@ -89,7 +94,25 @@ export async function createGroup(input: CreateGroupInput): Promise<ActionResult
     // Non-fatal: group created, VA can be retried
   }
 
-  // 4. Audit log
+  // 4. Create the first payment cycle — without this, the group would have
+  // no deadline/rotation data at all (nothing else in the codebase ever
+  // created one; the deadline countdown and "who's collecting" features
+  // would silently have nothing to show).
+  const cycleStart = parsed.data.start_date ? new Date(parsed.data.start_date) : new Date();
+  const cycleEnd = new Date(cycleStart);
+  if (parsed.data.contribution_frequency === "daily") cycleEnd.setDate(cycleEnd.getDate() + 1);
+  else if (parsed.data.contribution_frequency === "weekly") cycleEnd.setDate(cycleEnd.getDate() + 7);
+  else cycleEnd.setMonth(cycleEnd.getMonth() + 1);
+
+  await serviceClient.from("payment_cycles").insert({
+    group_id: group.id,
+    name: "Round 1",
+    start_date: cycleStart.toISOString().slice(0, 10),
+    end_date: cycleEnd.toISOString().slice(0, 10),
+    status: "active",
+  });
+
+  // 5. Audit log
   await serviceClient.from("audit_logs").insert({
     user_id: user.id,
     action: "GROUP_CREATED",
@@ -111,7 +134,12 @@ export async function updateGroup(
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return { success: false, error: "Not authenticated." };
 
-  const serviceClient = createServiceClient();
+  let serviceClient: ReturnType<typeof createServiceClient>;
+  try {
+    serviceClient = createServiceClient();
+  } catch (err) {
+    return { success: false, error: err instanceof Error ? err.message : "Server configuration error." };
+  }
 
   // Verify admin role
   const { data: membership } = await serviceClient
@@ -145,7 +173,12 @@ export async function generateInviteLink(
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return { success: false, error: "Not authenticated." };
 
-  const serviceClient = createServiceClient();
+  let serviceClient: ReturnType<typeof createServiceClient>;
+  try {
+    serviceClient = createServiceClient();
+  } catch (err) {
+    return { success: false, error: err instanceof Error ? err.message : "Server configuration error." };
+  }
 
   const { data: membership } = await serviceClient
     .from("group_memberships")
@@ -184,7 +217,12 @@ export async function acceptGroupInvite(token: string): Promise<ActionResult<{ g
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return { success: false, error: "Not authenticated." };
 
-  const serviceClient = createServiceClient();
+  let serviceClient: ReturnType<typeof createServiceClient>;
+  try {
+    serviceClient = createServiceClient();
+  } catch (err) {
+    return { success: false, error: err instanceof Error ? err.message : "Server configuration error." };
+  }
 
   // Fetch invite
   const { data: invite, error: inviteError } = await serviceClient
@@ -306,7 +344,12 @@ export async function removeMember(groupId: string, userId: string): Promise<Act
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return { success: false, error: "Not authenticated." };
 
-  const serviceClient = createServiceClient();
+  let serviceClient: ReturnType<typeof createServiceClient>;
+  try {
+    serviceClient = createServiceClient();
+  } catch (err) {
+    return { success: false, error: err instanceof Error ? err.message : "Server configuration error." };
+  }
 
   const { data: adminMembership } = await serviceClient
     .from("group_memberships")
