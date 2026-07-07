@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { createServiceClient } from "@/lib/supabase/server";
 import { createVirtualAccount, buildAccountRef } from "@/lib/nomba/virtual-accounts";
+import { withTimeout } from "@/lib/timeout";
 
 export async function POST(request: NextRequest) {
   const supabase = await createClient();
@@ -44,23 +45,38 @@ export async function POST(request: NextRequest) {
     .single();
 
   const accountRef = buildAccountRef(membershipId);
-  const va = await createVirtualAccount({
-    accountRef,
-    accountName: profile?.full_name ?? "AjoFlow Member",
-  });
+  try {
+    const va = await withTimeout(
+      createVirtualAccount({
+        accountRef,
+        accountName: profile?.full_name ?? "AjoFlow Member",
+      }),
+      8000,
+      "Virtual account creation"
+    );
 
-  const { data: newVA, error } = await serviceClient
-    .from("member_virtual_accounts")
-    .insert({
-      membership_id: membershipId,
-      account_number: va.bankAccountNumber,
-      bank_name: va.bankName,
-      account_reference: accountRef,
-      account_name: va.bankAccountName,
-    })
-    .select()
-    .single();
+    const { data: newVA, error } = await serviceClient
+      .from("member_virtual_accounts")
+      .insert({
+        membership_id: membershipId,
+        account_number: va.bankAccountNumber,
+        bank_name: va.bankName,
+        account_reference: accountRef,
+        account_name: va.bankAccountName,
+      })
+      .select()
+      .single();
 
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
-  return NextResponse.json({ success: true, data: newVA });
+    if (error) return NextResponse.json({ success: false, error: error.message }, { status: 500 });
+    return NextResponse.json({ success: true, data: newVA });
+  } catch (err) {
+    // Real error surfaced instead of a generic crash — this is what
+    // reveals whether it's the known sandbox "2 accounts per holder" cap
+    // (confirmed via /api/debug/nomba-test earlier) or something else.
+    console.error("[VA retry] Creation failed:", err);
+    return NextResponse.json(
+      { success: false, error: err instanceof Error ? err.message : "Could not generate your virtual account." },
+      { status: 500 }
+    );
+  }
 }
