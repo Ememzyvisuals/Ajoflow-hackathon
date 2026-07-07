@@ -7,18 +7,19 @@ const FROM = process.env.RESEND_FROM_EMAIL ?? "AjoFlow <onboarding@resend.dev>";
 
 export async function POST(request: NextRequest) {
   try {
-    const { email } = await request.json();
+    const { email, next } = await request.json();
     if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
       return NextResponse.json({ error: "Valid email required." }, { status: 400 });
     }
 
     const supabase = createServiceClient();
     const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000";
+    const redirectTarget = typeof next === "string" && next.startsWith("/") ? next : "/dashboard";
 
     const { data, error } = await supabase.auth.admin.generateLink({
       type: "magiclink",
       email,
-      options: { redirectTo: `${appUrl}/auth/callback` },
+      options: { redirectTo: `${appUrl}/auth/callback?next=${encodeURIComponent(redirectTarget)}` },
     });
 
     if (error || !data?.properties?.action_link) {

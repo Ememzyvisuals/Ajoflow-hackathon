@@ -1,8 +1,8 @@
 "use client";
 
-import { useState } from "react";
+import { useState, Suspense } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { Eye, EyeOff, Loader2, MailCheck, Sparkles } from "lucide-react";
@@ -10,8 +10,10 @@ import { signUp } from "@/features/auth/actions";
 import { SignUpSchema, type SignUpInput } from "@/features/auth/schemas";
 import { createClient } from "@/lib/supabase/client";
 
-export default function SignUpPage() {
+function SignUpPageInner() {
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const inviteToken = searchParams.get("invite");
   const [showPw, setShowPw] = useState(false);
   const [loading, setLoading] = useState(false);
   const [googleLoading, setGoogleLoading] = useState(false);
@@ -27,10 +29,12 @@ export default function SignUpPage() {
 
   async function onSubmit(data: SignUpInput) {
     setLoading(true); setServerError("");
-    const result = await signUp(data);
+    const result = await signUp({ ...data, inviteToken: inviteToken ?? undefined });
     setLoading(false);
     if (result.success) {
-      result.data?.requiresConfirmation ? setSuccess(true) : router.push("/onboarding");
+      result.data?.requiresConfirmation
+        ? setSuccess(true)
+        : router.push(inviteToken ? `/onboarding?invite=${inviteToken}` : "/onboarding");
     } else {
       setServerError(result.error ?? "Sign up failed");
     }
@@ -45,7 +49,9 @@ export default function SignUpPage() {
     // Site URL (landing page) instead of /auth/callback.
     const { error } = await supabase.auth.signInWithOAuth({
       provider: "google",
-      options: { redirectTo: `${window.location.origin}/auth/callback?next=/onboarding` },
+      options: {
+        redirectTo: `${window.location.origin}/auth/callback?next=/onboarding${inviteToken ? `&invite=${encodeURIComponent(inviteToken)}` : ""}`,
+      },
     });
     if (error) {
       setGoogleLoading(false);
@@ -61,7 +67,7 @@ export default function SignUpPage() {
       const res = await fetch("/api/auth/magic-link", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email }),
+        body: JSON.stringify({ email, next: inviteToken ? `/onboarding?invite=${inviteToken}` : "/onboarding" }),
       });
       const data = await res.json();
       if (data.success) { setMagicSent(true); setMagicEmail(email); }
@@ -227,5 +233,13 @@ export default function SignUpPage() {
         </p>
       </div>
     </div>
+  );
+}
+
+export default function SignUpPage() {
+  return (
+    <Suspense fallback={<div className="w-full max-w-sm h-96 bg-white rounded-2xl border border-border shimmer" />}>
+      <SignUpPageInner />
+    </Suspense>
   );
 }

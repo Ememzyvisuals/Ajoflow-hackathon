@@ -203,7 +203,7 @@ export async function approvePayout(payoutId: string): Promise<ActionResult> {
   // Check group wallet balance
   const { data: wallet } = await serviceClient
     .from("group_wallets")
-    .select("balance")
+    .select("balance, total_paid_out")
     .eq("group_id", payout.group_id)
     .single();
 
@@ -240,7 +240,7 @@ export async function approvePayout(payoutId: string): Promise<ActionResult> {
       .from("group_wallets")
       .update({
         balance: wallet.balance - payout.amount,
-        total_paid_out: (wallet as { total_paid_out: number }).total_paid_out + payout.amount,
+        total_paid_out: wallet.total_paid_out + payout.amount,
         last_updated: new Date().toISOString(),
       })
       .eq("group_id", payout.group_id);

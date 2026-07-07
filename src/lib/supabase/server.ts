@@ -1,4 +1,5 @@
 import { createServerClient } from "@supabase/ssr";
+import { createClient as createSupabaseClient } from "@supabase/supabase-js";
 import { cookies } from "next/headers";
 
 export async function createClient() {
@@ -27,8 +28,15 @@ export async function createClient() {
 }
 
 // ── Service Role Client (server-side only, bypasses RLS) ──────
+// Uses the plain @supabase/supabase-js client, not @supabase/ssr's
+// cookie-aware createServerClient — this client never needs a user
+// session or cookies at all, since the service role key bypasses RLS
+// entirely. Previously used require("@supabase/ssr") dynamically, which
+// is fragile under Next.js production bundling and could silently
+// resolve to undefined, causing "X is not a function" (minified to a
+// single letter) on every single feature that calls this — which is
+// exactly the pattern of crashes reported across unrelated flows.
 export function createServiceClient() {
-  const { createClient: createSSRClient } = require("@supabase/ssr");
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
   if (!url || !key) {
@@ -37,18 +45,10 @@ export function createServiceClient() {
       "Check Vercel → Settings → Environment Variables → Production."
     );
   }
-  return createSSRClient(
-    url,
-    key,
-    {
-      cookies: {
-        getAll: () => [],
-        setAll: () => {},
-      },
-      auth: {
-        persistSession: false,
-        autoRefreshToken: false,
-      },
-    }
-  );
+  return createSupabaseClient(url, key, {
+    auth: {
+      persistSession: false,
+      autoRefreshToken: false,
+    },
+  });
 }

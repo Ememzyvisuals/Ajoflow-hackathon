@@ -5,6 +5,7 @@ export async function GET(request: NextRequest) {
   const { searchParams, origin } = new URL(request.url);
   const code = searchParams.get("code");
   const next = searchParams.get("next") ?? "/dashboard";
+  const invite = searchParams.get("invite");
 
   if (code) {
     const supabase = await createClient();
@@ -21,9 +22,13 @@ export async function GET(request: NextRequest) {
           .eq("id", user.id)
           .single();
 
-        // No phone = onboarding not done → always go to onboarding
+        // No phone = onboarding not done → always go to onboarding, but
+        // carry the invite token along so it isn't lost — onboarding
+        // itself is responsible for redirecting back to /invite/{token}
+        // once it's done.
         if (!profile?.phone) {
-          return NextResponse.redirect(`${origin}/onboarding`);
+          const onboardingUrl = invite ? `${origin}/onboarding?invite=${encodeURIComponent(invite)}` : `${origin}/onboarding`;
+          return NextResponse.redirect(onboardingUrl);
         }
       }
 

@@ -20,6 +20,7 @@ export async function signUp(input: {
   email: string;
   password: string;
   phone?: string;
+  inviteToken?: string;
 }): Promise<ActionResult<{ requiresConfirmation?: boolean }>> {
   const parsed = SignUpSchema.safeParse(input);
   if (!parsed.success) {
@@ -28,6 +29,7 @@ export async function signUp(input: {
 
   const supabase = await createClient();
   const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000";
+  const invitePart = input.inviteToken ? `&invite=${encodeURIComponent(input.inviteToken)}` : "";
 
   const { data, error } = await supabase.auth.signUp({
     email: parsed.data.email,
@@ -37,7 +39,7 @@ export async function signUp(input: {
         full_name: parsed.data.fullName,
         phone: parsed.data.phone ?? null,
       },
-      emailRedirectTo: `${appUrl}/auth/callback?next=/onboarding`,
+      emailRedirectTo: `${appUrl}/auth/callback?next=/onboarding${invitePart}`,
     },
   });
 

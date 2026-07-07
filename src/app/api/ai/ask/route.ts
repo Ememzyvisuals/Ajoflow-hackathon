@@ -38,12 +38,14 @@ export async function POST(request: NextRequest) {
       .eq("group_id", membership.group_id)
       .single();
     walletBalance = wallet?.balance ?? 0;
-    groupName = (membership.groups as { name: string } | null)?.name ?? "your group";
+    const groupsJoin = membership.groups as { name: string } | { name: string }[] | null;
+    groupName = (Array.isArray(groupsJoin) ? groupsJoin[0]?.name : groupsJoin?.name) ?? "your group";
   }
 
-  const trustScore = Array.isArray(membership?.trust_scores)
-    ? membership.trust_scores[0]?.score ?? 100
-    : (membership?.trust_scores as { score: number } | null)?.score ?? 100;
+  const rawTrustScores = membership?.trust_scores as { score: number } | { score: number }[] | undefined;
+  const trustScore = Array.isArray(rawTrustScores)
+    ? rawTrustScores[0]?.score ?? 100
+    : rawTrustScores?.score ?? 100;
 
   try {
     const answer = await answerFinancialQuestion({

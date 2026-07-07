@@ -1,7 +1,7 @@
 "use client";
 
-import { useState } from "react";
-import { useRouter } from "next/navigation";
+import { useState, Suspense } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
@@ -18,8 +18,10 @@ type FormData = z.infer<typeof schema>;
 
 const STEPS = ["Profile", "Language", "Done"];
 
-export default function OnboardingPage() {
+function OnboardingPageInner() {
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const inviteToken = searchParams.get("invite");
   const [step, setStep] = useState(0);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
@@ -36,7 +38,7 @@ export default function OnboardingPage() {
     setLoading(false);
     if (result.success) {
       setStep(2);
-      setTimeout(() => router.push("/dashboard"), 1500);
+      setTimeout(() => router.push(inviteToken ? `/invite/${inviteToken}` : "/dashboard"), 1500);
     } else {
       setError(result.error ?? "Failed to save profile");
     }
@@ -166,5 +168,13 @@ export default function OnboardingPage() {
         )}
       </div>
     </div>
+  );
+}
+
+export default function OnboardingPage() {
+  return (
+    <Suspense fallback={<div className="w-full max-w-sm h-96 bg-white rounded-2xl border border-border shimmer" />}>
+      <OnboardingPageInner />
+    </Suspense>
   );
 }

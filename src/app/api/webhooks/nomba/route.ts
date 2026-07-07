@@ -42,31 +42,25 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     return NextResponse.json({ error: "Cannot read body" }, { status: 400 });
   }
 
-  // ── 1. Signature Verification ──────────────────────────────
-  // Confirmed from Nomba webhook registration form:
-  // header name is "nomba-signature" (not "x-nomba-signature")
   const signature =
     request.headers.get("nomba-signature") ??
     request.headers.get("x-nomba-signature") ??   // fallback just in case
     "";
 
-  if (process.env.NOMBA_ENV !== "sandbox") {
-    // Skip signature check in sandbox only for initial testing
-    if (!verifySignature(rawBody, signature)) {
-      console.warn("[Webhook] Invalid signature received");
-      return NextResponse.json({ error: "Invalid signature" }, { status: 401 });
-    }
-  }
-
-  // ── 2. Parse Payload ───────────────────────────────────────
-  let payload: Record<string, unknown>;
+  // Parse early (before the signature gate) purely so we have a requestId
+  // and event_type to record — even a signature failure gets logged now,
+  // instead of vanishing with zero trace. This matters because there's an
+  // unresolved, unconfirmed question about whether Nomba's real signing
+  // algorithm differs from ours (see docs/nomba-integration.md) — if it
+  // does, every real webhook would previously have been silently dropped
+  // with nothing to debug from.
+  let payload: Record<string, unknown> = {};
   try {
     payload = JSON.parse(rawBody);
   } catch {
-    return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
+    // Leave payload as {} — still worth recording that *something* arrived
   }
-
-  const eventType = (payload.event_type ?? payload.eventType) as string;
+  const eventType = (payload.event_type ?? payload.eventType ?? "unknown") as string;
   const requestId = (payload.requestId ?? payload.request_id ?? crypto.randomUUID()) as string;
 
   let supabase: ReturnType<typeof createServiceClient>;
@@ -81,6 +75,29 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     // rather than the event being lost forever.
     console.error("[Webhook] CRITICAL: service client init failed —", err instanceof Error ? err.message : err);
     return NextResponse.json({ error: "Server configuration error" }, { status: 500 });
+  }
+
+  // ── Signature Verification ──────────────────────────────────
+  // Confirmed from Nomba webhook registration form:
+  // header name is "nomba-signature" (not "x-nomba-signature")
+  if (process.env.NOMBA_ENV !== "sandbox") {
+    // Skip signature check in sandbox only for initial testing
+    if (!verifySignature(rawBody, signature)) {
+      console.warn(`[Webhook] Invalid signature received for requestId=${requestId}, event=${eventType}`);
+      // Record it anyway — don't process it as a real event, but keep the
+      // evidence. If Nomba's actual signing algorithm turns out to differ
+      // from what we verify against, this is what lets it be diagnosed
+      // and, if needed, manually reconciled — instead of disappearing.
+      await supabase.from("webhook_events").insert({
+        request_id: requestId,
+        event_type: eventType,
+        payload,
+        signature,
+        processed: false,
+        error: "Invalid signature — event recorded but not processed",
+      }).select().maybeSingle();
+      return NextResponse.json({ error: "Invalid signature" }, { status: 401 });
+    }
   }
 
   // ── 3. Idempotency Check ────────────────────────────────────

@@ -5,16 +5,19 @@
 // Multiple people confirmed — send amount in NAIRA directly
 // NO multiplication by 100
 //
-// CONFIRMED from hackathon channel (July 5 2026, Tochukwu):
-// /checkout/order must use the SUB-ACCOUNT as the accountId header,
-// not the parent. Orders created under the parent's accountId silently
-// never fire a webhook event at all — payment succeeds, Nomba's own
-// event-logs show zero events, nothing arrives at our webhook URL.
-// This does not affect /accounts/virtual, which correctly uses the
-// parent header (see virtual-accounts.ts).
+// accountId header (July 6 2026 — superseding an earlier fix):
+// Victor Shoaga (Nomba team) clarified in the hackathon channel that the
+// accountId header should ALWAYS be the parent account ID for EVERY
+// request, with sub-account scoping done via path/body/query fields
+// instead, never via the header. An earlier fix here (based on another
+// participant's own unconfirmed diagnosis) had switched this to the
+// sub-account, theorizing that fixed missing webhooks. Reverted to the
+// parent per the more authoritative guidance. The actual, confirmed fix
+// for missing webhook events is registering the webhook URL on BOTH the
+// parent AND the sub-account — see docs/nomba-integration.md.
 // ============================================================
 
-import { nombaRequest, SUB_ACCOUNT_ID } from "./client";
+import { nombaRequest, PARENT_ACCOUNT_ID } from "./client";
 
 export interface CreateCheckoutOrderParams {
   orderReference: string;
@@ -59,7 +62,7 @@ export async function createCheckoutOrder(
 
   const response = await nombaRequest<{ code: string; data: NombaCheckoutOrder }>(
     "/checkout/order",
-    { method: "POST", accountId: SUB_ACCOUNT_ID, body }
+    { method: "POST", accountId: PARENT_ACCOUNT_ID, body }
   );
 
   return response.data;

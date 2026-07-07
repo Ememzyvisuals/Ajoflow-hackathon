@@ -42,7 +42,7 @@ function LoginForm() {
       const res = await fetch("/api/auth/magic-link", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email }),
+        body: JSON.stringify({ email, next: redirectTo }),
       });
       const data = await res.json();
       if (data.success) { setMagicSent(true); setMagicEmail(email); }
