@@ -8,6 +8,7 @@ AjoFlow digitizes traditional Ajo, Esusu, and cooperative thrift savings with au
 
 ## Table of Contents
 
+- [For Reviewers — Demo Access](#for-reviewers--demo-access)
 - [Project Overview](#project-overview)
 - [Why AjoFlow](#why-ajoflow)
 - [Architecture Overview](#architecture-overview)
@@ -27,7 +28,36 @@ AjoFlow digitizes traditional Ajo, Esusu, and cooperative thrift savings with au
 
 ---
 
-## Project Overview
+## For Reviewers — Demo Access
+
+**Live app:** https://ajoflow.vercel.app
+
+**Demo login (pre-seeded, no signup needed):**
+- Email: `[fill in your demo account email]`
+- Password: `[fill in your demo account password]`
+
+This account already belongs to an active group with a working virtual account, so you can review contributions, trust scores, discussions, and the payout flow without creating a new group.
+
+### Known Sandbox Limitation — Virtual Account Creation
+
+Nomba's sandbox enforces a hard limit of **2 virtual accounts per account holder, platform-wide** (not per-group). This limit was reached during our own integration testing via `/api/debug/nomba-test`, which consumed both available slots. As a result, **creating a brand-new group in this live demo will show "Could not generate virtual account"** — this is a Nomba sandbox constraint, not an application bug. The feature is fully implemented and was verified working during development:
+
+```json
+// Successful virtual account creation (2026-07-05T06:38:55.234Z)
+{"success":true,"data":{"bankAccountNumber":"8035229829","bankAccountName":"Nomba/AjoFlow Debug Test","bankName":"Nombank MFB","accountRef":"aftestmr7f7d5n","accountName":"Nomba Hackathon 2026/emmanuel Ariyo","currency":"NGN","expired":false}}
+
+// Second successful creation, same session (2026-07-05T06:46:47.466Z)
+{"success":true,"data":{"bankAccountNumber":"7476988193","bankAccountName":"Nomba/AjoFlow Debug Test","bankName":"Nombank MFB","accountRef":"aftestmr7fhhxl"}}
+
+// Third attempt — Nomba's own sandbox confirming the cap
+{"success":false,"error":"HTTP 400: Only 2 sandbox virtual accounts are allowed per account holder"}
+```
+
+Relevant code: `src/lib/nomba/virtual-accounts.ts`, `src/features/groups/actions.ts`.
+
+---
+
+
 
 **Mission:** Build a production-grade digital Ajo, Esusu, and Cooperative Finance operating system powered entirely by Nomba's payment infrastructure.
 
