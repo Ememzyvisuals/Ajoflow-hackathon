@@ -33,10 +33,10 @@ AjoFlow digitizes traditional Ajo, Esusu, and cooperative thrift savings with au
 **Live app:** https://ajoflow.vercel.app
 
 **Demo login (pre-seeded, no signup needed):**
-- Email: `[fill in your demo account email]`
-- Password: `[fill in your demo account password]`
+- Email: `adeshinaemmanuel333@gmail.com`
+- Password: `testdemo@2026`
 
-This account already belongs to an active group with a working virtual account, so you can review contributions, trust scores, discussions, and the payout flow without creating a new group.
+This account belongs to an active group ("Barbers Association") where you can review the group dashboard, deadline countdown, trust scores, discussions, and payout flow. **Note:** this group's virtual account could not be generated because Nomba's sandbox 2-account-per-holder limit was already reached during our own testing (see below) — everything else is fully functional and testable.
 
 ### Known Sandbox Limitation — Virtual Account Creation
 
