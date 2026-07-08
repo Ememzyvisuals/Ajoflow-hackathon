@@ -32,11 +32,17 @@ AjoFlow digitizes traditional Ajo, Esusu, and cooperative thrift savings with au
 
 **Live app:** https://ajoflow.vercel.app
 
-**Demo login (pre-seeded, no signup needed):**
-- Email: `adeshinaemmanuel333@gmail.com`
-- Password: `testdemo@2026`
+**How to get in — join via invite link with Google sign-in:**
+https://ajoflow.vercel.app/invite/a2edeb57a45b7e1d07e3b0486fcf1791
 
-This account belongs to an active group ("Barbers Association") where you can review the group dashboard, deadline countdown, trust scores, discussions, and payout flow. **Note:** this group's virtual account could not be generated because Nomba's sandbox 2-account-per-holder limit was already reached during our own testing (see below) — everything else is fully functional and testable.
+1. Open the link above
+2. Choose **"Create account & Join"**
+3. Sign up with **Google** (not email/password — see note below)
+4. You'll be added directly to an active group ("Barbers Association") and land in its dashboard — deadline countdown, trust scores, discussions, and payout flow are all live and testable there
+
+**Please use Google sign-in only.** A display bug was found in the email/password flow late in testing, and per competition rules no further code changes are allowed after the build phase closed, so we're not able to fix it before review. Google sign-in gives the full, correct experience.
+
+**This invite link works for exactly one person.** It's single-use by design — once one reviewer joins with it, anyone who opens it after will see "Invalid or expired invite link." Please coordinate so only one reviewer uses it to join; that's enough to fully exercise the sign-up → group flow, and the group itself remains visible for that reviewer to explore in depth afterward.
 
 ### Known Sandbox Limitation — Virtual Account Creation
 
