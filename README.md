@@ -33,8 +33,8 @@ AjoFlow digitizes traditional Ajo, Esusu, and cooperative thrift savings with au
 **Live app:** https://ajoflow.vercel.app
 
 **Demo login (pre-seeded, no signup needed):**
-- Email: `[fill in your demo account email]`
-- Password: `[fill in your demo account password]`
+- Email: `[adeshinaemmanuel333@gmail.com]`
+- Password: `[testdemo@2026]`
 
 This account already belongs to an active group with a working virtual account, so you can review contributions, trust scores, discussions, and the payout flow without creating a new group.
 
